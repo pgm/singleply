@@ -17,17 +17,34 @@ type Tracker struct {
 }
 
 func (s *Tracker) AddOperation(operation string) *State {
-	panic("unimp")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	state := &State{operation: operation, latest: ""}
+	s.states[state] = state
+
+	return state
 }
 
 func (s *Tracker) OperationComplete(state *State) {
-	panic("unimp")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	delete(s.states, state)
 }
 
 func (s *Tracker) GetState() []*State {
-	panic("unimp")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	states := make([]*State, 0, len(s.states))
+	for _, st := range states {
+		states = append(states, &State{operation: st.operation, latest: st.latest})
+	}
+
+	return states
 }
 
 func (s *State) SetStatus(status string) {
-	panic("unimp")
+	s.latest = status
 }

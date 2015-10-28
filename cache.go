@@ -38,29 +38,6 @@ func (rs *RegionSet) firstMissing(region Region) *Region {
 	return remainder
 }
 
-// func (rs *RegionSet) add(region Region) {
-// 	start := sort.Search(len(rs.regions), func(i int) bool {
-// 		return rs.regions[i].offset >= region.offset
-// 	})
-//
-// 	end := sort.Search(len(rs.regions), func(i int) bool {
-// 		return rs.regions[i].offset >= region.offset + region.length
-// 	})
-//
-// 	// adjust region by overlapping region at start and end if there is one and then
-// 	// splice the new region into the array
-//
-// 	// if the previous region overlaps this one, merge them
-// 	if rs.regions[i-1].offset + rs.regions[i-1].length > region.offset {
-// 		i -= 1
-// 		rs.regions[i].length = region.offset + region.length - rs.regions[i].offset
-// 	} else {
-// 		// insert as a new item
-// 		// TODO
-// 	}
-//
-// }
-
 type DirEntries []*FileStat
 
 func (f *DirEntries) Get(name string) *FileStat {
