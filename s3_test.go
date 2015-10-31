@@ -66,6 +66,44 @@ func (s *S3Suite) TearDownSuite(c *C) {
 	s.fakes3Cmd.Wait()
 }
 
+// func (s *S3Suite) TestListObjects(c *C) {
+// 	createBucket := s3.CreateBucketInput{Bucket: aws.String("TestListObjects")}
+// 	_, err := s.svc.CreateBucket(&createBucket)
+// 	c.Assert(err, IsNil)
+//
+// 	buffer := bytes.NewReader(make([]byte, 0))
+// 	putObject := s3.PutObjectInput{}
+// 	putObject.Bucket = aws.String("TestListObjects")
+// 	putObject.Key = aws.String("prefix/dir/")
+// 	putObject.Body = buffer
+// 	s.svc.PutObject(&putObject)
+//
+// 	putObject = s3.PutObjectInput{}
+// 	putObject.Bucket = aws.String("TestListObjects")
+// 	putObject.Key = aws.String("prefix/dir/a")
+// 	putObject.Body = buffer
+// 	s.svc.PutObject(&putObject)
+//
+// 	putObject = s3.PutObjectInput{}
+// 	putObject.Bucket = aws.String("TestListObjects")
+// 	putObject.Key = aws.String("prefix/dir/b")
+// 	putObject.Body = buffer
+// 	s.svc.PutObject(&putObject)
+//
+// 	putObject = s3.PutObjectInput{}
+// 	putObject.Bucket = aws.String("TestListObjects")
+// 	putObject.Key = aws.String("prefix/c")
+// 	putObject.Body = buffer
+// 	s.svc.PutObject(&putObject)
+//
+// 	input := s3.ListObjectsInput{Bucket: aws.String("TestListObjects"), Delimiter: aws.String("/"), Prefix: aws.String("prefix/")}
+//
+// 	objs, err := s.svc.ListObjects(&input)
+// 	fmt.Printf("contents: %s\n", objs.Contents)
+// 	c.Assert(len(objs.CommonPrefixes), Equals, 1)
+// 	c.Assert(len(objs.Contents), Equals, 0)
+// }
+
 func (s *S3Suite) TestConnection(c *C) {
 	createBucket := s3.CreateBucketInput{Bucket: aws.String("bucket")}
 	_, err := s.svc.CreateBucket(&createBucket)
@@ -83,11 +121,11 @@ func (s *S3Suite) TestConnection(c *C) {
 	putObject.Body = buffer
 	s.svc.PutObject(&putObject)
 
-	// putObject = s3.PutObjectInput{}
-	// putObject.Bucket = aws.String("bucket")
-	// putObject.Key = aws.String("prefix/sampledir/")
-	// putObject.Body = bytes.NewReader(make([]byte, 0))
-	// svc.PutObject(&putObject)
+	putObject = s3.PutObjectInput{}
+	putObject.Bucket = aws.String("bucket")
+	putObject.Key = aws.String("prefix/sampledir/")
+	putObject.Body = bytes.NewReader(make([]byte, 0))
+	s.svc.PutObject(&putObject)
 
 	putObject = s3.PutObjectInput{}
 	putObject.Bucket = aws.String("bucket")
@@ -105,12 +143,12 @@ func (s *S3Suite) TestConnection(c *C) {
 	fmt.Printf("files=%s\n", files)
 	c.Assert(err, IsNil)
 	c.Assert(len(files), Equals, 2)
-	f := files[0]
+	f := files[1]
 	c.Assert(f.Name, Equals, "banana")
 	c.Assert(f.Size, Equals, uint64(100))
 	c.Assert(f.IsDir, Equals, false)
 
-	f = files[1]
+	f = files[0]
 	c.Assert(f.Name, Equals, "sampledir")
 	c.Assert(f.Size, Equals, uint64(0))
 	c.Assert(f.IsDir, Equals, true)

@@ -84,21 +84,34 @@ func (c *S3Connection) ListDir(path string, status StatusCallback) ([]*FileStat,
 	prefix := c.prefix + "/" + path
 	input := s3.ListObjectsInput{Bucket: aws.String(c.bucket), Delimiter: aws.String("/"), Prefix: &prefix}
 
+	// Handle cases where there are objects with keys like "dir/".  "dir" will be both a key and a common prefix
+	// Not sure if this is a bug in fakes3 though, because there should be no key with the name "dir".  However,
+	// filtering to avoid issues with both key and directry with same name
+	dirNames := make(map[string]string)
+
 	err := c.svc.ListObjectsPages(&input, func(p *s3.ListObjectsOutput, lastPage bool) bool {
+		for _, p := range p.CommonPrefixes {
+			name := *p.Prefix
+			name = name[len(prefix) : len(name)-1]
+
+			fmt.Printf("Adding dir %s for prefix %s\n", name, (*p.Prefix))
+			files = append(files, &FileStat{Name: name, IsDir: true, Size: uint64(0)})
+			dirNames[name] = name
+		}
+
 		for _, object := range p.Contents {
 			name := (*object.Key)[len(prefix):]
+
+			if _, present := dirNames[name]; present {
+				fmt.Printf("Skipping file %s for key %s because a dir with that name exists\n", name, (*object.Key))
+				continue
+			}
+
+			fmt.Printf("Adding file %s for key %s\n", name, (*object.Key))
 			isDir := false
 			files = append(files, &FileStat{Name: name, IsDir: isDir, Size: uint64(*object.Size)})
 		}
 
-		// do I need to do something to handle cases where there are objects with keys like "dir/".  It appears that they get returned in
-		// ListObjectsPages.  Or maybe that's a bug in fakes3?
-
-		for _, p := range p.CommonPrefixes {
-			name := *p.Prefix
-			name = name[len(prefix) : len(name)-1]
-			files = append(files, &FileStat{Name: name, IsDir: true, Size: uint64(0)})
-		}
 		return true
 	})
 
