@@ -152,5 +152,4 @@ func (s *S3Suite) TestConnection(c *C) {
 	c.Assert(f.Name, Equals, "sampledir")
 	c.Assert(f.Size, Equals, uint64(0))
 	c.Assert(f.IsDir, Equals, true)
-
 }

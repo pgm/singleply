@@ -16,6 +16,10 @@ type Tracker struct {
 	states map[*State]*State
 }
 
+func NewTracker() *Tracker {
+	return &Tracker{states: make(map[*State]*State)}
+}
+
 func (s *Tracker) AddOperation(operation string) *State {
 	s.lock.Lock()
 	defer s.lock.Unlock()

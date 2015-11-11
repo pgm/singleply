@@ -11,7 +11,7 @@ import (
 	// "github.com/pgm/pliant/v2/tagsvc"
 )
 
-func startMount(mountpoint string, filesystem *FS) {
+func StartMount(mountpoint string, filesystem *FS) {
 	c, err := fuse.Mount(
 		mountpoint,
 		fuse.FSName("pliantfuse"),

@@ -38,22 +38,29 @@ func (rs *RegionSet) firstMissing(region Region) *Region {
 	return remainder
 }
 
-type DirEntries []*FileStat
+type DirEntries struct {
+	Files []*FileStat
+}
 
 func (f *DirEntries) Get(name string) *FileStat {
-	panic("unimp")
+	for i := 0; i < len(f.Files); i++ {
+		if f.Files[i].Name == name {
+			return f.Files[i]
+		}
+	}
+	return nil
 }
 
 const FILE_MAP = "files"
 const DIR_MAP = "dirs"
 
 type Cache interface {
-	GetLocalFile(path string, length uint64) string
+	GetLocalFile(path string, length uint64) (string, error)
 	GetFirstMissingRegion(path string, offset uint64, length uint64) *Region
 	AddedRegions(path string, offset uint64, length uint64)
 
-	GetListDir(path string) *DirEntries
-	PutListDir(path string, files *DirEntries)
+	GetListDir(path string) (*DirEntries, error)
+	PutListDir(path string, files *DirEntries) error
 }
 
 type LocalCache struct {
@@ -98,7 +105,10 @@ func (c *LocalCache) GetLocalFile(path string, length uint64) (string, error) {
 		entryBytes := b.Get(key)
 		if entryBytes == nil {
 			var err error
-			localPath, err = ioutil.TempDir(c.rootDir, "l")
+			localFile, err := ioutil.TempFile(c.rootDir, "l")
+			localPath = localFile.Name()
+			fmt.Printf("Created local file: %s\n", localPath)
+			localFile.Close()
 			if err != nil {
 				return err
 			}

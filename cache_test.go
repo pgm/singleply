@@ -94,13 +94,11 @@ func (s *CacheSuite) TestDirOperations(c *C) {
 
 	files := make([]*FileStat, 1)
 	files[0] = &FileStat{Name: "b", IsDir: false, Size: 10}
-	var d DirEntries
-	d = files
-	cache.PutListDir("a", &d)
+	d := &DirEntries{Files: files}
+	cache.PutListDir("a", d)
 
 	dir2, err := cache.GetListDir("a")
-	f2 := []*FileStat(*dir2)
 	c.Assert(err, IsNil)
-	c.Assert(len(f2), Equals, 1)
-	c.Assert(f2[0], DeepEquals, files[0])
+	c.Assert(len(dir2.Files), Equals, 1)
+	c.Assert(dir2.Files[0], DeepEquals, files[0])
 }

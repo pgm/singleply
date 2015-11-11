@@ -16,8 +16,8 @@ type FileStat struct {
 }
 
 type Connector interface {
-	ListDir(path string, status StatusCallback) ([]*FileStat, error)
-	PrepareForRead(path string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared Region, err error)
+	ListDir(path string, status StatusCallback) (*DirEntries, error)
+	PrepareForRead(path string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error)
 }
 
 type Region struct {
@@ -28,34 +28,41 @@ type Region struct {
 type FS struct {
 	connector Connector
 	cache     Cache
-	tracker   Tracker
+	tracker   *Tracker
+}
+
+func NewFileSystem(connector Connector, cache Cache, tracker *Tracker) *FS {
+	return &FS{connector: connector, cache: cache, tracker: tracker}
 }
 
 func (f *FS) Root() (fs.Node, error) {
 	return &Dir{path: "", fs: f}, nil
 }
 
-func (fs *FS) ListDir(path string) ([]*FileStat, error) {
-	files, err := fs.ListDir(path)
+func (fs *FS) ListDir(path string) (*DirEntries, error) {
+	cachedDir, err := fs.cache.GetListDir(path)
 	if err != nil {
+		fmt.Printf("cache.GetListDir returned error: %s\n", err.Error())
 		return nil, err
 	}
 
-	if files != nil {
-		return files, nil
+	if cachedDir != nil {
+		return cachedDir, nil
 	}
 
 	state := fs.tracker.AddOperation(fmt.Sprintf("ListDir(%s)", path))
-	files, err = fs.connector.ListDir(path, state)
+	files, err := fs.connector.ListDir(path, state)
 	fs.tracker.OperationComplete(state)
 
 	if err != nil {
+		fmt.Printf("ListDir returned error: %s\n", err.Error())
 		return nil, err
 	}
 
-	var de DirEntries
-	de = files
-	fs.cache.PutListDir(path, &de)
+	err = fs.cache.PutListDir(path, files)
+	if err != nil {
+		return nil, err
+	}
 
 	return files, nil
 }
@@ -99,7 +106,7 @@ type File struct {
 
 func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	a.Mode = os.ModeDir | 0777
-	fmt.Printf("Attr(%s) -> %o\n", d.path, a.Mode)
+	fmt.Printf("Dir.Attr(%s) -> %o\n", d.path, a.Mode)
 	return nil
 }
 
@@ -109,24 +116,29 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		return nil, err
 	}
 
-	var ff DirEntries
-	ff = files
-	entry := ff.Get(name)
+	entry := files.Get(name)
 	if entry == nil {
+		if len(files.Files) == 0 {
+			fmt.Printf("Could not find entry for \"%s\" among %d entries for %s\n", name, len(files.Files), d.path)
+		}
 		return nil, fuse.ENOENT
 	}
+
 	if entry.IsDir {
 		return &Dir{path: d.path + "/" + name, fs: d.fs}, nil
 	} else {
-		return &File{path: d.path + "/" + name, fs: d.fs}, nil
+		return &File{path: d.path + "/" + name, fs: d.fs, size: entry.Size}, nil
 	}
 }
 
 func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	files, err := d.fs.ListDir(d.path)
+	filesv, err := d.fs.ListDir(d.path)
 	if err != nil {
 		return nil, err
 	}
+	files := filesv.Files
+
+	fmt.Printf("Dir %s had %d entries\n", d.path, len(files))
 
 	dirDirs := make([]fuse.Dirent, len(files))
 	for i := 0; i < len(files); i++ {
@@ -147,6 +159,7 @@ func (f *FileHandle) Forget() {
 
 func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 	//	a.Inode = 2
+	fmt.Printf("File.Attr(%s) -> size=%d\n", f.path, f.size)
 	a.Mode = 0444
 	a.Size = f.size
 	return nil
@@ -156,7 +169,10 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 
 	fmt.Printf("open(%s)\n", f.path)
 
-	localPath := f.fs.cache.GetLocalFile(f.path, f.size)
+	localPath, err := f.fs.cache.GetLocalFile(f.path, f.size)
+	if err != nil {
+		return nil, err
+	}
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return nil, err
@@ -168,6 +184,7 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 func (f *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
 	err := f.fs.PrepareForRead(f.path, f.file.Name(), uint64(req.Offset), uint64(req.Size), nil)
 	if err != nil {
+		fmt.Printf("PrepareForRead failed: %s\n", err.Error())
 		return err
 	}
 

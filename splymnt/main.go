@@ -1,56 +1,40 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"os"
-
-	"gopkg.in/gcfg.v1"
 
 	_ "bazil.org/fuse/fs/fstestutil"
 	"github.com/codegangsta/cli"
+	"github.com/pgm/singleply"
 )
 
 func main() {
 	app := cli.NewApp()
 	app.Name = "splymnt"
 	app.Usage = "splymnt fuse client"
-	app.Flags = []cli.Flag{
-		&cli.StringFlag{Name: "dev", Value: "", Usage: "Enable development mode.  Root service, local service and fuse client all run in-process."},
-	}
+	// app.Flags = []cli.Flag{
+	// 	&cli.StringFlag{Name: "dev", Value: "", Usage: "Enable development mode.  Root service, local service and fuse client all run in-process."},
+	// }
 
 	// todo: add commands "mount", "status"
+	app.Commands = []cli.Command{
+		{
+			Name:  "mount",
+			Usage: "mount",
+			Action: func(c *cli.Context) {
+				cacheDir := c.Args().Get(0)
+				mountPoint := c.Args().Get(1)
+				cache, err := singleply.NewLocalCache(cacheDir)
+				if err != nil {
+					panic(err.Error())
+				}
 
-	app.Action = func(c *cli.Context) {
-		mountpoint := c.Args().Get(0)
-		fmt.Printf("mount point: %s\n", mountpoint)
+				fs := singleply.NewFileSystem(&singleply.MockConn{},
+					cache,
+					singleply.NewTracker())
 
-		cfg := struct {
-			S3 struct {
-				AccessKeyId     string
-				SecretAccessKey string
-				Endpoint        string
-				Bucket          string
-				Prefix          string
-			}
-			Settings struct {
-				Port        int
-				PersistPath string
-				AuthSecret  string
-			}
-		}{}
-
-		fd, err := os.Open(devConfig)
-		if err != nil {
-			log.Fatalf("Could not open %s", devConfig)
-		}
-		err = gcfg.ReadInto(&cfg, fd)
-		if err != nil {
-			log.Fatalf("Failed to parse %s: %s", devConfig, err)
-		}
-		fd.Close()
-
-	}
+				singleply.StartMount(mountPoint, fs)
+			}}}
 
 	app.Run(os.Args)
 }
