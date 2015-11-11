@@ -202,6 +202,10 @@ func (c *LocalCache) AddedRegions(path string, offset uint64, length uint64) {
 }
 
 func (c *LocalCache) GetListDir(path string) (*DirEntries, error) {
+	if path == "" {
+		path = "/"
+	}
+
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -233,6 +237,10 @@ func (c *LocalCache) GetListDir(path string) (*DirEntries, error) {
 }
 
 func (c *LocalCache) PutListDir(path string, files *DirEntries) error {
+	if path == "" {
+		path = "/"
+	}
+
 	buffer := bytes.NewBuffer(make([]byte, 0, 100))
 	enc := gob.NewEncoder(buffer)
 	enc.Encode(files)
