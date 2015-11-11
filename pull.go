@@ -47,9 +47,11 @@ func (fs *FS) ListDir(path string) (*DirEntries, error) {
 	}
 
 	if cachedDir != nil {
+		fmt.Printf("found dir \"%s\" in cache\n", path)
 		return cachedDir, nil
 	}
 
+	fmt.Printf("did not find dir \"%s\" in cache\n", path)
 	state := fs.tracker.AddOperation(fmt.Sprintf("ListDir(%s)", path))
 	files, err := fs.connector.ListDir(path, state)
 	fs.tracker.OperationComplete(state)
@@ -59,6 +61,7 @@ func (fs *FS) ListDir(path string) (*DirEntries, error) {
 		return nil, err
 	}
 
+	fmt.Printf("storing dir \"%s\" in cache\n", path)
 	err = fs.cache.PutListDir(path, files)
 	if err != nil {
 		return nil, err
@@ -118,16 +121,22 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 
 	entry := files.Get(name)
 	if entry == nil {
-		if len(files.Files) == 0 {
-			fmt.Printf("Could not find entry for \"%s\" among %d entries for %s\n", name, len(files.Files), d.path)
-		}
+		//if len(files.Files) == 0 {
+		fmt.Printf("Could not find entry for \"%s\" among %d entries for %s\n", name, len(files.Files), d.path)
+		//}
 		return nil, fuse.ENOENT
 	}
 
-	if entry.IsDir {
-		return &Dir{path: d.path + "/" + name, fs: d.fs}, nil
+	var childName string
+	if d.path == "" {
+		childName = name
 	} else {
-		return &File{path: d.path + "/" + name, fs: d.fs, size: entry.Size}, nil
+		childName = d.path + "/" + name
+	}
+	if entry.IsDir {
+		return &Dir{path: childName, fs: d.fs}, nil
+	} else {
+		return &File{path: childName, fs: d.fs, size: entry.Size}, nil
 	}
 }
 
@@ -138,7 +147,11 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	}
 	files := filesv.Files
 
-	fmt.Printf("Dir %s had %d entries\n", d.path, len(files))
+	fmt.Printf("Dir \"%s\" had %d entries:", d.path, len(files))
+	for _, f := range files {
+		fmt.Printf("\"%s\" ", f.Name)
+	}
+	fmt.Printf("\n")
 
 	dirDirs := make([]fuse.Dirent, len(files))
 	for i := 0; i < len(files); i++ {
