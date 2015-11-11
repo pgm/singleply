@@ -53,8 +53,8 @@ type S3Connection struct {
 	svc      *s3.S3
 }
 
-func NewConnection(bucket string, prefix string, region string, endpoint string) *S3Connection {
-	config := aws.NewConfig().WithCredentials(credentials.AnonymousCredentials).WithEndpoint(endpoint).WithRegion(region).WithS3ForcePathStyle(true)
+func NewS3Connection(creds *credentials.Credentials, bucket string, prefix string, region string, endpoint string) *S3Connection {
+	config := aws.NewConfig().WithCredentials(creds).WithEndpoint(endpoint).WithRegion(region).WithS3ForcePathStyle(true)
 
 	svc := s3.New(config)
 
@@ -79,7 +79,7 @@ func (c *S3Connection) PrepareForRead(path string, localPath string, offset uint
 	return &Region{offset, length}, err
 }
 
-func (c *S3Connection) ListDir(path string, status StatusCallback) ([]*FileStat, error) {
+func (c *S3Connection) ListDir(path string, status StatusCallback) (*DirEntries, error) {
 	files := make([]*FileStat, 0, 100)
 	prefix := c.prefix + "/" + path
 	input := s3.ListObjectsInput{Bucket: aws.String(c.bucket), Delimiter: aws.String("/"), Prefix: &prefix}
@@ -107,8 +107,14 @@ func (c *S3Connection) ListDir(path string, status StatusCallback) ([]*FileStat,
 				continue
 			}
 
-			fmt.Printf("Adding file %s for key %s\n", name, (*object.Key))
+			fmt.Printf("Adding file \"%s\" for key \"%s\"\n", name, (*object.Key))
 			isDir := false
+
+			if name == "" {
+				//name = "INVALID"
+				continue
+			}
+
 			files = append(files, &FileStat{Name: name, IsDir: isDir, Size: uint64(*object.Size)})
 		}
 
@@ -119,5 +125,5 @@ func (c *S3Connection) ListDir(path string, status StatusCallback) ([]*FileStat,
 		return nil, err
 	}
 
-	return files, nil
+	return &DirEntries{Files: files}, nil
 }

@@ -109,10 +109,10 @@ func (s *S3Suite) TestConnection(c *C) {
 	_, err := s.svc.CreateBucket(&createBucket)
 	c.Assert(err, IsNil)
 
-	conn := NewConnection("bucket", "prefix", s.region, s.endpoint)
+	conn := NewS3Connection("bucket", "prefix", s.region, s.endpoint)
 	files, err := conn.ListDir("path", nil)
 	c.Assert(err, IsNil)
-	c.Assert(len(files), Equals, 0)
+	c.Assert(len(files.Files), Equals, 0)
 
 	buffer := bytes.NewReader(make([]byte, 100))
 	putObject := s3.PutObjectInput{}
@@ -142,13 +142,13 @@ func (s *S3Suite) TestConnection(c *C) {
 	files, err = conn.ListDir("", nil)
 	fmt.Printf("files=%s\n", files)
 	c.Assert(err, IsNil)
-	c.Assert(len(files), Equals, 2)
-	f := files[1]
+	c.Assert(len(files.Files), Equals, 2)
+	f := files.Files[1]
 	c.Assert(f.Name, Equals, "banana")
 	c.Assert(f.Size, Equals, uint64(100))
 	c.Assert(f.IsDir, Equals, false)
 
-	f = files[0]
+	f = files.Files[0]
 	c.Assert(f.Name, Equals, "sampledir")
 	c.Assert(f.Size, Equals, uint64(0))
 	c.Assert(f.IsDir, Equals, true)
