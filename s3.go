@@ -22,10 +22,11 @@ var BadLength error = errors.New("Bad length read")
 func copyTo(localPath string, offset uint64, length uint64, reader io.ReadCloser) error {
 	defer reader.Close()
 
-	w, err := os.Open(localPath)
+	w, err := os.OpenFile(localPath, os.O_RDWR, 0777);
 	if err != nil {
 		return err
 	}
+	//fmt.Printf("copyTo(%s,%d,%d,%s)\n", localPath, offset, length, reader)
 	defer w.Close()
 
 	_, err = w.Seek(int64(offset), 0)
@@ -39,7 +40,7 @@ func copyTo(localPath string, offset uint64, length uint64, reader io.ReadCloser
 	}
 
 	if written != int64(length) {
-		return BadLength
+		return errors.New(fmt.Sprintf("Expected to write %d bytes, but wrote %d", length, written))
 	}
 
 	return nil
@@ -67,7 +68,7 @@ func (c *S3Connection) PrepareForRead(path string, localPath string, offset uint
 	key := c.prefix + "/" + path
 	input := s3.GetObjectInput{Bucket: &c.bucket,
 		Key:   &key,
-		Range: aws.String(fmt.Sprintf("%d-%d", offset, offset+length-1))}
+		Range: aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))}
 
 	result, err := c.svc.GetObject(&input)
 	err = copyTo(localPath, offset, length, result.Body)
@@ -78,7 +79,6 @@ func (c *S3Connection) PrepareForRead(path string, localPath string, offset uint
 
 	return &Region{offset, length}, err
 }
-
 
 func (c *S3Connection) ListDir(path string, status StatusCallback) (*DirEntries, error) {
 	files := make([]*FileStat, 0, 100)
