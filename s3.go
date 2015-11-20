@@ -79,6 +79,7 @@ func (c *S3Connection) PrepareForRead(path string, localPath string, offset uint
 	return &Region{offset, length}, err
 }
 
+
 func (c *S3Connection) ListDir(path string, status StatusCallback) (*DirEntries, error) {
 	files := make([]*FileStat, 0, 100)
 	prefix := c.prefix + "/" + path

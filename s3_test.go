@@ -109,7 +109,7 @@ func (s *S3Suite) TestConnection(c *C) {
 	_, err := s.svc.CreateBucket(&createBucket)
 	c.Assert(err, IsNil)
 
-	conn := NewS3Connection("bucket", "prefix", s.region, s.endpoint)
+	conn := NewS3Connection(credentials.AnonymousCredentials, "bucket", "prefix", s.region, s.endpoint)
 	files, err := conn.ListDir("path", nil)
 	c.Assert(err, IsNil)
 	c.Assert(len(files.Files), Equals, 0)
