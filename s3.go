@@ -82,7 +82,11 @@ func (c *S3Connection) PrepareForRead(path string, localPath string, offset uint
 
 func (c *S3Connection) ListDir(path string, status StatusCallback) (*DirEntries, error) {
 	files := make([]*FileStat, 0, 100)
+	if path != "" {
+		path = path + "/"
+	}
 	prefix := c.prefix + "/" + path
+	fmt.Printf("ListDir(prefix=\"%s\")\n", prefix)
 	input := s3.ListObjectsInput{Bucket: aws.String(c.bucket), Delimiter: aws.String("/"), Prefix: &prefix}
 
 	// Handle cases where there are objects with keys like "dir/".  "dir" will be both a key and a common prefix
@@ -91,11 +95,13 @@ func (c *S3Connection) ListDir(path string, status StatusCallback) (*DirEntries,
 	dirNames := make(map[string]string)
 
 	err := c.svc.ListObjectsPages(&input, func(p *s3.ListObjectsOutput, lastPage bool) bool {
+		fmt.Printf("ListObjectPages returned %s\n", p)
+		
 		for _, p := range p.CommonPrefixes {
 			name := *p.Prefix
 			name = name[len(prefix) : len(name)-1]
 
-			fmt.Printf("Adding dir %s for prefix %s\n", name, (*p.Prefix))
+			fmt.Printf("Adding dir \"%s\" for prefix %s\n", name, (*p.Prefix))
 			files = append(files, &FileStat{Name: name, IsDir: true, Size: uint64(0)})
 			dirNames[name] = name
 		}
