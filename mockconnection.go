@@ -10,7 +10,7 @@ import (
 type MockConn struct {
 }
 
-func (c *MockConn) PrepareForRead(path string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
+func (c *MockConn) PrepareForRead(path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
 	f, err := os.OpenFile(localPath, os.O_RDWR, 0)
 
 	if err != nil {
@@ -32,5 +32,5 @@ func (c *MockConn) ListDir(path string, status StatusCallback) (*DirEntries, err
 	files = append(files, &FileStat{Name: "dir2", IsDir: true, Size: uint64(0)})
 	files = append(files, &FileStat{Name: "file1", IsDir: false, Size: uint64(len(path) + 6)})
 	files = append(files, &FileStat{Name: "file2", IsDir: false, Size: uint64(len(path) + 6)})
-	return &DirEntries{files}, nil
+	return &DirEntries{Valid: true, Files: files}, nil
 }

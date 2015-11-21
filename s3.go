@@ -62,11 +62,12 @@ func NewS3Connection(creds *credentials.Credentials, bucket string, prefix strin
 	return &S3Connection{bucket: bucket, prefix: prefix, region: region, endpoint: endpoint, svc: svc}
 }
 
-func (c *S3Connection) PrepareForRead(path string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
+func (c *S3Connection) PrepareForRead(path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
 	defaults.DefaultConfig.Region = aws.String("us-east-1")
 
 	key := c.prefix + "/" + path
 	input := s3.GetObjectInput{Bucket: &c.bucket,
+		IfMatch: &etag,
 		Key:   &key,
 		Range: aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))}
 
@@ -122,7 +123,7 @@ func (c *S3Connection) ListDir(path string, status StatusCallback) (*DirEntries,
 				continue
 			}
 
-			files = append(files, &FileStat{Name: name, IsDir: isDir, Size: uint64(*object.Size)})
+			files = append(files, &FileStat{Name: name, IsDir: isDir, Size: uint64(*object.Size), Etag: *object.ETag})
 		}
 
 		return true

@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"sync"
 	"time"
+	"os"
+	"errors"
 
 	"github.com/boltdb/bolt"
 )
@@ -39,6 +41,7 @@ func (rs *RegionSet) firstMissing(region Region) *Region {
 }
 
 type DirEntries struct {
+	Valid bool
 	Files []*FileStat
 }
 
@@ -56,11 +59,13 @@ const DIR_MAP = "dirs"
 
 type Cache interface {
 	GetLocalFile(path string, length uint64) (string, error)
+	EvictFile(path string) error
 	GetFirstMissingRegion(path string, offset uint64, length uint64) *Region
 	AddedRegions(path string, offset uint64, length uint64)
 
 	GetListDir(path string) (*DirEntries, error)
 	PutListDir(path string, files *DirEntries) error
+	Invalidate(path string) error
 }
 
 type LocalCache struct {
@@ -90,6 +95,47 @@ func NewLocalCache(rootDir string) (*LocalCache, error) {
 	}
 
 	return &LocalCache{rootDir: rootDir, db: db}, nil
+}
+
+var NotInCache error = errors.New("File not in cache")
+
+func (c *LocalCache) EvictFile(path string) error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	localPath := ""
+
+	err := c.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(FILE_MAP))
+		key := []byte(path)
+		entryBytes := b.Get(key)
+		if entryBytes != nil {
+			var e FileCacheEntry
+
+			buffer := bytes.NewBuffer(entryBytes)
+			dec := gob.NewDecoder(buffer)
+			err := dec.Decode(&e)
+			if err != nil {
+				return err
+			}
+
+			localPath = e.LocalPath
+			
+			b.Delete(key)
+		}
+		return nil
+	})
+	
+	if err != nil {
+		return err
+	}
+	
+	if localPath == "" {
+		return NotInCache
+	}
+	
+	err = os.Remove(localPath)
+	return err
 }
 
 func (c *LocalCache) GetLocalFile(path string, length uint64) (string, error) {
@@ -199,6 +245,36 @@ func (c *LocalCache) AddedRegions(path string, offset uint64, length uint64) {
 
 		return nil
 	})
+}
+
+func (c *LocalCache) Invalidate(path string) error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	
+	err := c.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(DIR_MAP))
+		key := []byte(path)
+		value := b.Get(key)
+		if value != nil {
+			buffer := bytes.NewBuffer(value)
+			dec := gob.NewDecoder(buffer)
+			var files DirEntries
+			dec.Decode(&files)
+
+			files.Valid = false
+			
+			encbuffer := bytes.NewBuffer(make([]byte, 0, 100))
+			enc := gob.NewEncoder(encbuffer)
+			enc.Encode(files)
+			
+			b.Put(key, encbuffer.Bytes())
+			return nil 
+		} else {
+			return NotInCache
+		}
+	})
+	
+	return err
 }
 
 func (c *LocalCache) GetListDir(path string) (*DirEntries, error) {
