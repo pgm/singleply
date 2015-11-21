@@ -75,6 +75,8 @@ func (fs *FS) ListDir(path string) (*DirEntries, error) {
 		fmt.Printf("found dir \"%s\" in cache\n", path)
 		if cachedDir.Valid {
 			return cachedDir, nil
+		} else {
+			fs.stats.IncGotStaleDirCount()
 		}
 	}
 

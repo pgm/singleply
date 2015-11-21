@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/defaults"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -54,12 +55,22 @@ type S3Connection struct {
 	svc      *s3.S3
 }
 
+var UpdateDetected error = errors.New("Detected change to file")
+
 func NewS3Connection(creds *credentials.Credentials, bucket string, prefix string, region string, endpoint string) *S3Connection {
 	config := aws.NewConfig().WithCredentials(creds).WithEndpoint(endpoint).WithRegion(region).WithS3ForcePathStyle(true)
 
 	svc := s3.New(config)
 
 	return &S3Connection{bucket: bucket, prefix: prefix, region: region, endpoint: endpoint, svc: svc}
+}
+
+func isStatusCode(err error, code int) bool {
+	reqFailure, ok := err.(awserr.RequestFailure)
+	if !ok {
+		return false
+	}
+	return reqFailure.StatusCode() == code
 }
 
 func (c *S3Connection) PrepareForRead(path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
@@ -72,6 +83,13 @@ func (c *S3Connection) PrepareForRead(path string, etag string, localPath string
 		Range: aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))}
 
 	result, err := c.svc.GetObject(&input)
+	if err != nil {
+		if(isStatusCode(err, 412)) {
+			return nil, UpdateDetected
+		}
+		return nil, err
+	}
+	
 	err = copyTo(localPath, offset, length, result.Body)
 
 	if err != nil {

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"time"
-
+	"io/ioutil"
 	"os/exec"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -104,7 +104,61 @@ func (s *S3Suite) TearDownSuite(c *C) {
 // 	c.Assert(len(objs.Contents), Equals, 0)
 // }
 
-func (s *S3Suite) TestConnection(c *C) {
+type NullStatusCallback struct {
+}
+
+func (s *NullStatusCallback) SetStatus(status string) {
+	
+}
+
+
+func (s *S3Suite) TestS3ModifyDuringRead(c *C) {
+	createBucket := s3.CreateBucketInput{Bucket: aws.String("modified")}
+	_, err := s.svc.CreateBucket(&createBucket)
+	c.Assert(err, IsNil)
+
+	// upload a file	
+	buffer := bytes.NewReader(make([]byte, 100))
+	putObject := s3.PutObjectInput{}
+	putObject.Bucket = aws.String("modified")
+	putObject.Key = aws.String("prefix/banana")
+	putObject.Body = buffer
+	s.svc.PutObject(&putObject)
+	
+	// make sure ListDir sees it
+	conn := NewS3Connection(credentials.AnonymousCredentials, "modified", "prefix", s.region, s.endpoint)
+	files, err := conn.ListDir("", nil)
+	c.Assert(err, IsNil)
+	c.Assert(len(files.Files), Equals, 1)
+	f := files.Files[0]
+	c.Assert(f.Name, Equals, "banana")
+
+	localFile, _ := ioutil.TempFile(c.MkDir(), "local")
+	localPath := localFile.Name()
+	localFile.Close()
+	
+	status := &NullStatusCallback{}
+	
+	// Perform a read
+	region, err := conn.PrepareForRead("banana", f.Etag, localPath, 0, 10, status)
+	c.Assert(err, IsNil)
+	c.Assert(region.Offset, Equals, uint64(0))
+	c.Assert(region.Length, Equals, uint64(10))
+
+	// upload new version of object
+	buffer = bytes.NewReader(make([]byte, 101))
+	putObject = s3.PutObjectInput{}
+	putObject.Bucket = aws.String("modified")
+	putObject.Key = aws.String("prefix/banana")
+	putObject.Body = buffer
+	s.svc.PutObject(&putObject)
+
+	// try a read, and we should get a failure because data changed, and hence Etag
+	_, err = conn.PrepareForRead("banana", f.Etag, localPath, 10, 20, status)
+	c.Assert(err, Equals, UpdateDetected)
+}
+
+func (s *S3Suite) TestS3Connection(c *C) {
 	createBucket := s3.CreateBucketInput{Bucket: aws.String("bucket")}
 	_, err := s.svc.CreateBucket(&createBucket)
 	c.Assert(err, IsNil)
