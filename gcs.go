@@ -132,11 +132,11 @@ func (c *GCSConnection) PrepareForRead(path string, etag string, localPath strin
 		return nil, err
 	}
 		
-	err = copyTo(localPath, 0, uint64(res.ContentLength), res.Body)
+	err = copyTo(localPath, offset, uint64(res.ContentLength), res.Body)
 	res.Body.Close()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Region{0, uint64(res.ContentLength)}, err
+	return &Region{offset, uint64(res.ContentLength)}, err
 }

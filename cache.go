@@ -190,6 +190,7 @@ func (c *LocalCache) GetLocalFile(path string, length uint64) (string, error) {
 }
 
 func (c *LocalCache) GetFirstMissingRegion(path string, offset uint64, length uint64) *Region {
+	fmt.Printf("GetFirstMissingRegion(\"%s\", %d, %d)\n",  path, offset, length)
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -199,7 +200,7 @@ func (c *LocalCache) GetFirstMissingRegion(path string, offset uint64, length ui
 		b := tx.Bucket([]byte(FILE_MAP))
 		key := []byte(path)
 		entryBytes := b.Get(key)
-		fmt.Printf("fetched len %d for \"%s\"\n", len(entryBytes), path)
+//		fmt.Printf("in cache, fetched len %d for \"%s\"\n", len(entryBytes), path)
 		var e FileCacheEntry
 
 		buffer := bytes.NewBuffer(entryBytes)

@@ -7,6 +7,7 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
+	"errors"
 )
 
 type FileStat struct {
@@ -121,6 +122,7 @@ func (fs *FS) PrepareForRead(path string, etag, localPath string, offset uint64,
 			break
 		}
 
+		fmt.Printf("Fetching region %s to fulfill read of (offset: %d, len: %s) for %s\n", region, offset, length, path)
 		state := fs.tracker.AddOperation(fmt.Sprintf("PrepareForRead(%s, %d, %d)", path, region.Offset, region.Length))
 		prepared, err := fs.connector.PrepareForRead(path, etag, localPath, region.Offset, region.Length, state)
 		fs.tracker.OperationComplete(state)
@@ -131,6 +133,11 @@ func (fs *FS) PrepareForRead(path string, etag, localPath string, offset uint64,
 
 		fs.stats.IncPrepareForReadSuccessCount()
 		fs.stats.IncBytesRead(int64(prepared.Length))
+		
+		if prepared.Offset > region.Offset || (prepared.Offset + prepared.Length) < (region.Offset + region.Length) {
+			return errors.New(fmt.Sprintf("Requested region %s but got %s", region, prepared))
+		}
+		
 		fs.cache.AddedRegions(path, prepared.Offset, prepared.Length)
 	}
 
