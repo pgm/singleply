@@ -111,6 +111,10 @@ type Config struct {
 			Prefix          string
 			Region          string
 		}
+		GCS struct {
+			Prefix string
+			Bucket string
+		}
 		Settings struct {
 			MountPoint string
 			CacheDir   string
@@ -221,9 +225,17 @@ func main() {
 					panic(err.Error())
 				}
 
+				var connection singleply.Connector
+				if cfg.GCS.Bucket != "" {
+					connection = singleply.NewGCSConnection(cfg.GCS.Bucket, cfg.GCS.Prefix)
+				} else if cfg.S3.Bucket != "" {
+					s3creds := credentials.NewStaticCredentials(cfg.S3.AccessKeyId, cfg.S3.SecretAccessKey, "")
+					connection = singleply.NewS3Connection(s3creds, cfg.S3.Bucket, cfg.S3.Prefix, cfg.S3.Region, cfg.S3.Endpoint)
+				} else {
+					panic("Needed either GCS bucket or S3 bucket selected")
+				}
+
 				stats := &singleply.Stats{}
-				s3creds := credentials.NewStaticCredentials(cfg.S3.AccessKeyId, cfg.S3.SecretAccessKey, "")
-				connection := singleply.NewS3Connection(s3creds, cfg.S3.Bucket, cfg.S3.Prefix, cfg.S3.Region, cfg.S3.Endpoint)
 				tracker := singleply.NewTracker()
 				fs := singleply.NewFileSystem(connection,
 					cache,
