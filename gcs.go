@@ -47,9 +47,8 @@ func (c *GCSConnection) ListDir(path string, status StatusCallback) (*DirEntries
 	// Not sure if this is a bug in fakes3 though, because there should be no key with the name "dir".  However,
 	// filtering to avoid issues with both key and directry with same name
 	dirNames := make(map[string]string)
-        var service *storage.ObjectsService
         
-	err := listAllObjects(service, c.bucket, prefix, func(objects *storage.Objects) error {
+	err := listAllObjects(c.service, c.bucket, prefix, func(objects *storage.Objects) error {
 		for _, p := range objects.Prefixes {
 			name := p
 			name = name[len(prefix) : len(name)-1]
@@ -124,7 +123,7 @@ func (c *GCSConnection) PrepareForRead(path string, etag string, localPath strin
 	//	Key:   &key,
 	//	Range: aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))}
 	
-	res, err := c.service.Get(c.bucket, key).Download()
+	res, err := c.service.Get(c.bucket, key).IfMatch(etag).Range(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)).Download()
 
 	if err != nil {
 		if(isStatusCode(err, 412)) {
