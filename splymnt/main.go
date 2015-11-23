@@ -6,8 +6,10 @@ import (
 	"os"
 	"encoding/json"
 	"net/rpc"
+	"time"
 	"net"
-
+	"bazil.org/fuse/fs"
+	
 	_ "bazil.org/fuse/fs/fstestutil"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/codegangsta/cli"
@@ -20,6 +22,7 @@ type SplyClient struct {
 	stats *singleply.Stats
 	tracker *singleply.Tracker
 	cache singleply.Cache
+	server *fs.Server
 }
 
 func (c *SplyClient) GetStats(args *string, result **string) error {
@@ -49,6 +52,10 @@ func (c *SplyClient) GetStatus(args *string, result **string) error {
 }
 
 func (c *SplyClient) Invalidate(path string, result **string) error {
+	// TODO: Clear kernel cache
+	//c.server.InvalidateNodeData()
+	// c.server.InvalidateEntry()
+	
 	err := c.cache.Invalidate(path)
 	var r string
 	if err != nil {
@@ -119,6 +126,7 @@ type Config struct {
 			MountPoint string
 			CacheDir   string
 			ControlFile string
+			DelaySecs int
 		}
 	}
 
@@ -234,6 +242,10 @@ func main() {
 				} else {
 					panic("Needed either GCS bucket or S3 bucket selected")
 				}
+				
+				if cfg.Settings.DelaySecs != 0 {
+					connection = singleply.DelayConnector(time.Second * time.Duration(cfg.Settings.DelaySecs), connection)
+				}
 
 				stats := &singleply.Stats{}
 				tracker := singleply.NewTracker()
@@ -242,14 +254,28 @@ func main() {
 					tracker,
 					stats)
 
-				client := SplyClient{stats: stats, tracker: tracker, cache: cache}
+				log.Printf("StartMount\n")
+				fc, server, serveCompleted := singleply.StartMount(cfg.Settings.MountPoint, fs)
+				defer fc.Close()
+				log.Printf("StartMount completed\n")
+
+				client := SplyClient{stats: stats, tracker: tracker, cache: cache, server: server}
 
 				_, err = StartServer(cfg.Settings.ControlFile, &client)
 				if err != nil {
 					panic(err.Error())
 				}
+				
+				log.Printf("StartServer completed\n")
+				
+				// check if the mount process has an error to report
+				<-fc.Ready
+				if err := fc.MountError; err != nil {
+					log.Fatal(err)
+				}
+				// wait until server is shut down
+				<- serveCompleted
 
-				singleply.StartMount(cfg.Settings.MountPoint, fs)
 			}}}
 
 	app.Run(os.Args)

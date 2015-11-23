@@ -3,6 +3,7 @@ package singleply
 import (
 	"fmt"
 	"os"
+	"log"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -267,4 +268,42 @@ func (f *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse
 	// TODO: check, did caller allocate Data before this call?
 	resp.Data = buffer[:n]
 	return err
+}
+
+func StartMount(mountpoint string, filesystem *FS) (*fuse.Conn, *fs.Server, chan struct{}) {
+	c, err := fuse.Mount(
+		mountpoint,
+		fuse.FSName("pliantfuse"),
+		fuse.Subtype("pliant"),
+		fuse.LocalVolume(),
+		fuse.VolumeName("pliant"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	doneChan := make(chan struct{})
+	log.Println("Before server.Serve")
+	server := fs.New(c, nil)
+	go (func() {
+		err := server.Serve(filesystem)
+		if err != nil {
+			log.Fatal(err)
+		}
+		close(doneChan)
+	})()
+	log.Println("After server.Serve")
+	
+	return c, server, doneChan
+}
+
+func tileRegion(region *Region,  size uint64) []*Region {
+	start := (region.Offset/size) * size
+	end := ((region.Offset + region.Length + size - 1) / size)
+	tiles := make([]*Region, 0, int((end-start)/size) )
+	for i := start ; i < end ; i += size {
+		tiles = append(tiles, &Region{Offset: i, Length: size})
+	}
+	
+	return tiles
 }
