@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"time"
 )
 
 // just used for testing.  A connector which claims every dir has the same contents.  And every file contains just its own filename
@@ -33,4 +34,23 @@ func (c *MockConn) ListDir(path string, status StatusCallback) (*DirEntries, err
 	files = append(files, &FileStat{Name: "file1", IsDir: false, Size: uint64(len(path) + 6)})
 	files = append(files, &FileStat{Name: "file2", IsDir: false, Size: uint64(len(path) + 6)})
 	return &DirEntries{Valid: true, Files: files}, nil
+}
+
+type DelayConn struct {
+	delay time.Duration
+	underlying Connector
+}
+
+func DelayConnector(delay time.Duration, conn Connector) Connector {
+	return &DelayConn{delay: delay, underlying: conn}
+} 
+
+func (c *DelayConn) PrepareForRead(path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
+	time.Sleep(c.delay)
+	return c.underlying.PrepareForRead(path, etag, localPath, offset, length, status)
+}
+
+func (c *DelayConn) ListDir(path string, status StatusCallback) (*DirEntries, error) {
+	time.Sleep(c.delay)
+	return c.ListDir(path, status)
 }
