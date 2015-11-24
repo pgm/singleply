@@ -5,6 +5,7 @@ import (
 	"os"
 	"log"
 
+
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
@@ -19,8 +20,8 @@ type FileStat struct {
 }
 
 type Connector interface {
-	ListDir(path string, status StatusCallback) (*DirEntries, error)
-	PrepareForRead(path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error)
+	ListDir(context context.Context, path string, status StatusCallback) (*DirEntries, error)
+	PrepareForRead(context context.Context, path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error)
 }
 
 type Region struct {
@@ -66,7 +67,7 @@ func (fs *FS) cleanupOldSnapshot(path string, oldFiles *DirEntries, newFiles *Di
 	return nil
 }
 
-func (fs *FS) ListDir(path string) (*DirEntries, error) {
+func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 	cachedDir, err := fs.cache.GetListDir(path)
 	if err != nil {
 		fmt.Printf("cache.GetListDir returned error: %s\n", err.Error())
@@ -85,7 +86,7 @@ func (fs *FS) ListDir(path string) (*DirEntries, error) {
 	fmt.Printf("did not find dir \"%s\" in cache\n", path)
 	
 	state := fs.tracker.AddOperation(fmt.Sprintf("ListDir(%s)", path))
-	files, err := fs.connector.ListDir(path, state)
+	files, err := fs.connector.ListDir(ctx, path, state)
 	fs.tracker.OperationComplete(state)
 
 	if err != nil {
@@ -116,7 +117,7 @@ func (fs *FS) ListDir(path string) (*DirEntries, error) {
 	return files, nil
 }
 
-func (fs *FS) PrepareForRead(path string, etag, localPath string, offset uint64, length uint64, status StatusCallback) error {
+func (fs *FS) PrepareForRead(ctx context.Context, path string, etag, localPath string, offset uint64, length uint64, status StatusCallback) error {
 	for {
 		region := fs.cache.GetFirstMissingRegion(path, offset, length)
 		if region == nil {
@@ -125,7 +126,7 @@ func (fs *FS) PrepareForRead(path string, etag, localPath string, offset uint64,
 
 		fmt.Printf("Fetching region %s to fulfill read of (offset: %d, len: %s) for %s\n", region, offset, length, path)
 		state := fs.tracker.AddOperation(fmt.Sprintf("PrepareForRead(%s, %d, %d)", path, region.Offset, region.Length))
-		prepared, err := fs.connector.PrepareForRead(path, etag, localPath, region.Offset, region.Length, state)
+		prepared, err := fs.connector.PrepareForRead(ctx, path, etag, localPath, region.Offset, region.Length, state)
 		fs.tracker.OperationComplete(state)
 		if err != nil {
 			fs.stats.IncPrepareForReadFailedCount()
@@ -171,7 +172,7 @@ func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 }
 
 func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
-	files, err := d.fs.ListDir(d.path)
+	files, err := d.fs.ListDir(ctx, d.path)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +199,7 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 }
 
 func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	filesv, err := d.fs.ListDir(d.path)
+	filesv, err := d.fs.ListDir(ctx, d.path)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +254,7 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 }
 
 func (f *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	err := f.fs.PrepareForRead(f.path, f.etag, f.file.Name(), uint64(req.Offset), uint64(req.Size), nil)
+	err := f.fs.PrepareForRead(ctx, f.path, f.etag, f.file.Name(), uint64(req.Offset), uint64(req.Size), nil)
 	if err != nil {
 		fmt.Printf("PrepareForRead failed: %s\n", err.Error())
 		return err

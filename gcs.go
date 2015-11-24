@@ -35,7 +35,7 @@ type GCSConnection struct {
 }
 
 
-func (c *GCSConnection) ListDir(path string, status StatusCallback) (*DirEntries, error) {
+func (c *GCSConnection) ListDir(context context.Context, path string, status StatusCallback) (*DirEntries, error) {
 	files := make([]*FileStat, 0, 100)
 	if path != "" {
 		path = path + "/"
@@ -115,7 +115,7 @@ func NewGCSConnection(bucket string, prefix string) *GCSConnection {
 	return &GCSConnection{bucket: bucket, prefix: prefix, service: service.Objects}
 }
 
-func (c *GCSConnection) PrepareForRead(path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
+func (c *GCSConnection) PrepareForRead(context context.Context, path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
 	key := c.prefix + "/" + path
 
 	// TODO: Add

@@ -23,7 +23,7 @@ type SplyClient struct {
 	tracker *singleply.Tracker
 	cache singleply.Cache
 	server *fs.Server
-	fs *fs.FS
+	fs fs.FS
 }
 
 func (c *SplyClient) GetStats(args *string, result **string) error {

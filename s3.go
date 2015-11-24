@@ -6,7 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/aws/aws-sdk-go/aws"
+        "golang.org/x/net/context"
+			"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/defaults"
@@ -73,7 +74,7 @@ func isStatusCode(err error, code int) bool {
 	return reqFailure.StatusCode() == code
 }
 
-func (c *S3Connection) PrepareForRead(path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
+func (c *S3Connection) PrepareForRead(context context.Context, path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
 	defaults.DefaultConfig.Region = aws.String("us-east-1")
 
 	key := c.prefix + "/" + path
@@ -99,7 +100,7 @@ func (c *S3Connection) PrepareForRead(path string, etag string, localPath string
 	return &Region{offset, length}, err
 }
 
-func (c *S3Connection) ListDir(path string, status StatusCallback) (*DirEntries, error) {
+func (c *S3Connection) ListDir(context context.Context, path string, status StatusCallback) (*DirEntries, error) {
 	files := make([]*FileStat, 0, 100)
 	if path != "" {
 		path = path + "/"
