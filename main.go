@@ -23,6 +23,7 @@ type SplyClient struct {
 	tracker *singleply.Tracker
 	cache singleply.Cache
 	server *fs.Server
+	fs *fs.FS
 }
 
 func (c *SplyClient) GetStats(args *string, result **string) error {
@@ -51,9 +52,29 @@ func (c *SplyClient) GetStatus(args *string, result **string) error {
 	return nil
 }
 
+/*
+func getNode(ctx context.Context, f fs.FS, path string) fs.Node {
+	node, err := f.Root()
+	//TODO: split and iterate
+	name := path
+	node, err = node.(fs.NodeStringLookuper).Lookup(ctx, name)
+	return node
+}
+
+func (c *SplyClient) GetLocal(args *string, result **string) error {
+	node := getNode(ctx, c.fs, args)
+	var req  *fuse.ReadRequest
+	var resp fuse.ReadResponse
+	err := node.(HandleReader).Read(ctx, req, &resp)
+	asString := string(b)
+	*result = &asString
+	return nil
+}
+*/
+
 func (c *SplyClient) Invalidate(path string, result **string) error {
 	// TODO: Clear kernel cache
-	//c.server.InvalidateNodeData()
+	// c.server.InvalidateNodeData()
 	// c.server.InvalidateEntry()
 	
 	err := c.cache.Invalidate(path)
@@ -158,7 +179,7 @@ func main() {
 	app.Commands = []cli.Command{
 		{
 			Name:  "invalidate",
-			Usage: "invalidate",
+			Usage: "invalidate configfile relpath",
 			Action: func(c *cli.Context) {
 				configFile := c.Args().Get(0)
 				path := c.Args().Get(1)
@@ -172,8 +193,23 @@ func main() {
 				fmt.Printf("status: %s\n", *result)
 			}},
 		{
+			Name:  "local",
+			Usage: "invalidate configfile relpath",
+			Action: func(c *cli.Context) {
+				configFile := c.Args().Get(0)
+				path := c.Args().Get(1)
+				cfg := loadConfig(configFile)
+				client := ConnectToServer(cfg.Settings.ControlFile)
+				var result *string
+				err := client.Call("SplyClient.GetLocal", path, &result)
+				if err != nil {
+					log.Fatalf("SplyClient.GetLocal failed: %s", err.Error())
+				}
+				fmt.Printf("status: %s\n", *result)
+			}},
+		{
 			Name:  "status",
-			Usage: "status",
+			Usage: "status configfile",
 			Action: func(c *cli.Context) {
 				configFile := c.Args().Get(0)
 				cfg := loadConfig(configFile)
@@ -188,7 +224,7 @@ func main() {
 			}},
 		{
 			Name:  "stats",
-			Usage: "stats",
+			Usage: "stats configfile",
 			Action: func(c *cli.Context) {
 				configFile := c.Args().Get(0)
 				cfg := loadConfig(configFile)
@@ -203,26 +239,7 @@ func main() {
 			}},
 		{
 			Name:  "mount",
-			Usage: "mount",
-			Action: func(c *cli.Context) {
-				cacheDir := c.Args().Get(0)
-				mountPoint := c.Args().Get(1)
-				cache, err := singleply.NewLocalCache(cacheDir)
-				if err != nil {
-					panic(err.Error())
-				}
-
-				stats := &singleply.Stats{}
-				connection := &singleply.MockConn{}
-				fs := singleply.NewFileSystem(connection,
-					cache,
-					singleply.NewTracker(), stats)
-
-				singleply.StartMount(mountPoint, fs)
-			}},
-		{
-			Name:  "s3mount",
-			Usage: "s3mount",
+			Usage: "mount configfile",
 			Action: func(c *cli.Context) {
 				configFile := c.Args().Get(0)
 
@@ -259,7 +276,7 @@ func main() {
 				defer fc.Close()
 				log.Printf("StartMount completed\n")
 
-				client := SplyClient{stats: stats, tracker: tracker, cache: cache, server: server}
+				client := SplyClient{stats: stats, tracker: tracker, cache: cache, server: server, fs: fs}
 
 				_, err = StartServer(cfg.Settings.ControlFile, &client)
 				if err != nil {
