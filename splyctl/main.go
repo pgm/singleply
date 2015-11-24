@@ -1,15 +1,16 @@
 package main
 
 import (
-	"log"
-	"fmt"
-	"os"
 	"encoding/json"
-	"net/rpc"
-	"time"
+	"fmt"
+	"log"
 	"net"
+	"net/rpc"
+	"os"
+	"time"
+
 	"bazil.org/fuse/fs"
-	
+
 	_ "bazil.org/fuse/fs/fstestutil"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/codegangsta/cli"
@@ -19,11 +20,11 @@ import (
 )
 
 type SplyClient struct {
-	stats *singleply.Stats
+	stats   *singleply.Stats
 	tracker *singleply.Tracker
-	cache singleply.Cache
-	server *fs.Server
-	fs fs.FS
+	cache   singleply.Cache
+	server  *fs.Server
+	fs      fs.FS
 }
 
 func (c *SplyClient) GetStats(args *string, result **string) error {
@@ -42,7 +43,7 @@ func (c *SplyClient) GetStatus(args *string, result **string) error {
 		States []*singleply.State
 	}{}
 	wrapper.States = states
-	
+
 	b, err := json.Marshal(&wrapper)
 	if err != nil {
 		return err
@@ -76,7 +77,7 @@ func (c *SplyClient) Invalidate(path string, result **string) error {
 	// TODO: Clear kernel cache
 	// c.server.InvalidateNodeData()
 	// c.server.InvalidateEntry()
-	
+
 	err := c.cache.Invalidate(path)
 	var r string
 	if err != nil {
@@ -85,7 +86,7 @@ func (c *SplyClient) Invalidate(path string, result **string) error {
 		c.stats.IncInvalidatedDirCount()
 		r = "okay"
 	}
-	*result = &r	
+	*result = &r
 	return nil
 }
 
@@ -110,14 +111,14 @@ func notifyWhenFinished(fn func()) chan int {
 func StartServer(addr string, client *SplyClient) (chan int, error) {
 	server := rpc.NewServer()
 	server.Register(client)
-	
+
 	if _, err := os.Stat(addr); !os.IsNotExist(err) {
 		err = os.Remove(addr)
 		if err != nil {
 			log.Fatalf("Failed to remove %s: %s", addr, err.Error())
 		}
 	}
-	
+
 	l, err := net.ListenUnix("unix", &net.UnixAddr{addr, "unix"})
 	if err != nil {
 		return nil, err
@@ -131,25 +132,25 @@ func StartServer(addr string, client *SplyClient) (chan int, error) {
 }
 
 type Config struct {
-		S3 struct {
-			AccessKeyId     string
-			SecretAccessKey string
-			Endpoint        string
-			Bucket          string
-			Prefix          string
-			Region          string
-		}
-		GCS struct {
-			Prefix string
-			Bucket string
-		}
-		Settings struct {
-			MountPoint string
-			CacheDir   string
-			ControlFile string
-			DelaySecs int
-		}
+	S3 struct {
+		AccessKeyId     string
+		SecretAccessKey string
+		Endpoint        string
+		Bucket          string
+		Prefix          string
+		Region          string
 	}
+	GCS struct {
+		Prefix string
+		Bucket string
+	}
+	Settings struct {
+		MountPoint  string
+		CacheDir    string
+		ControlFile string
+		DelaySecs   int
+	}
+}
 
 func loadConfig(configFile string) *Config {
 	cfg := Config{}
@@ -163,8 +164,8 @@ func loadConfig(configFile string) *Config {
 		log.Fatalf("Failed to parse %s: %s", configFile, err)
 	}
 	fd.Close()
-	
-	return &cfg	
+
+	return &cfg
 }
 
 func main() {
@@ -259,9 +260,9 @@ func main() {
 				} else {
 					panic("Needed either GCS bucket or S3 bucket selected")
 				}
-				
+
 				if cfg.Settings.DelaySecs != 0 {
-					connection = singleply.DelayConnector(time.Second * time.Duration(cfg.Settings.DelaySecs), connection)
+					connection = singleply.DelayConnector(time.Second*time.Duration(cfg.Settings.DelaySecs), connection)
 				}
 
 				stats := &singleply.Stats{}
@@ -282,16 +283,16 @@ func main() {
 				if err != nil {
 					panic(err.Error())
 				}
-				
+
 				log.Printf("StartServer completed\n")
-				
+
 				// check if the mount process has an error to report
 				<-fc.Ready
 				if err := fc.MountError; err != nil {
 					log.Fatal(err)
 				}
 				// wait until server is shut down
-				<- serveCompleted
+				<-serveCompleted
 
 			}}}
 

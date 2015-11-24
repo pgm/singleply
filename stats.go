@@ -1,20 +1,20 @@
 package singleply
 
-import ( 
-	"sync/atomic"
+import (
 	"fmt"
+	"sync/atomic"
 )
 
 type Stats struct {
-	ListDirSuccessCount int32
-	ListDirFailedCount int32
+	ListDirSuccessCount        int32
+	ListDirFailedCount         int32
 	PrepareForReadSuccessCount int32
-	PrepareForReadFailedCount int32
-	BytesRead int64
-	FilesRead int32
-	FilesEvicted int32
-	GotStaleDirCount int32
-	InvalidatedDirCount int32
+	PrepareForReadFailedCount  int32
+	BytesRead                  int64
+	FilesRead                  int32
+	FilesEvicted               int32
+	GotStaleDirCount           int32
+	InvalidatedDirCount        int32
 }
 
 func (s *Stats) IncInvalidatedDirCount() {
@@ -26,24 +26,24 @@ func (s *Stats) IncGotStaleDirCount() {
 }
 
 func (s *Stats) IncListDirSuccessCount() {
-	v := atomic.AddInt32(&s.ListDirSuccessCount, 1);
+	v := atomic.AddInt32(&s.ListDirSuccessCount, 1)
 	fmt.Printf("IncListDirSuccessCount() -> %d\n", v)
 }
 
 func (s *Stats) IncFilesEvicted() {
-	atomic.AddInt32(&s.FilesEvicted, 1);
+	atomic.AddInt32(&s.FilesEvicted, 1)
 }
 
 func (s *Stats) IncListDirFailedCount() {
-	atomic.AddInt32(&s.ListDirFailedCount, 1);
+	atomic.AddInt32(&s.ListDirFailedCount, 1)
 }
 
 func (s *Stats) IncPrepareForReadSuccessCount() {
-	atomic.AddInt32(&s.PrepareForReadSuccessCount, 1);
+	atomic.AddInt32(&s.PrepareForReadSuccessCount, 1)
 }
 
 func (s *Stats) IncPrepareForReadFailedCount() {
-	atomic.AddInt32(&s.PrepareForReadFailedCount, 1);
+	atomic.AddInt32(&s.PrepareForReadFailedCount, 1)
 }
 
 func (s *Stats) IncBytesRead(count int64) {

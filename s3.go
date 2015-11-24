@@ -6,12 +6,12 @@ import (
 	"io"
 	"os"
 
-        "golang.org/x/net/context"
-			"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/defaults"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"golang.org/x/net/context"
 )
 
 // type Connector interface {
@@ -24,7 +24,7 @@ var BadLength error = errors.New("Bad length read")
 func copyTo(localPath string, offset uint64, length uint64, reader io.ReadCloser) error {
 	defer reader.Close()
 
-	w, err := os.OpenFile(localPath, os.O_RDWR, 0777);
+	w, err := os.OpenFile(localPath, os.O_RDWR, 0777)
 	if err != nil {
 		return err
 	}
@@ -80,17 +80,17 @@ func (c *S3Connection) PrepareForRead(context context.Context, path string, etag
 	key := c.prefix + "/" + path
 	input := s3.GetObjectInput{Bucket: &c.bucket,
 		IfMatch: &etag,
-		Key:   &key,
-		Range: aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))}
+		Key:     &key,
+		Range:   aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))}
 
 	result, err := c.svc.GetObject(&input)
 	if err != nil {
-		if(isStatusCode(err, 412)) {
+		if isStatusCode(err, 412) {
 			return nil, UpdateDetected
 		}
 		return nil, err
 	}
-	
+
 	err = copyTo(localPath, offset, length, result.Body)
 
 	if err != nil {
@@ -116,7 +116,7 @@ func (c *S3Connection) ListDir(context context.Context, path string, status Stat
 
 	err := c.svc.ListObjectsPages(&input, func(p *s3.ListObjectsOutput, lastPage bool) bool {
 		fmt.Printf("ListObjectPages returned %s\n", p)
-		
+
 		for _, p := range p.CommonPrefixes {
 			name := *p.Prefix
 			name = name[len(prefix) : len(name)-1]

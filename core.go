@@ -2,14 +2,14 @@ package singleply
 
 import (
 	"fmt"
-	"os"
 	"log"
+	"os"
 
+	"errors"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
-	"errors"
 )
 
 type FileStat struct {
@@ -33,7 +33,7 @@ type FS struct {
 	connector Connector
 	cache     Cache
 	tracker   *Tracker
-	stats *Stats
+	stats     *Stats
 }
 
 func NewFileSystem(connector Connector, cache Cache, tracker *Tracker, stats *Stats) *FS {
@@ -49,21 +49,21 @@ func (fs *FS) cleanupOldSnapshot(path string, oldFiles *DirEntries, newFiles *Di
 	for _, file := range newFiles.Files {
 		current[file.Name] = file.Etag
 	}
-	
+
 	for _, file := range oldFiles.Files {
 		// for each file, if it no longer exists or has changed, evict it from the cache
 		currentEtag, present := current[file.Name]
 		if !present || currentEtag != file.Etag {
- 			err := fs.cache.EvictFile(path + "/" + file.Name)
-			
+			err := fs.cache.EvictFile(path + "/" + file.Name)
+
 			if err == nil {
 				fs.stats.IncFilesEvicted()
 			} else if err != NotInCache {
 				return err
-			} 		
+			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -84,7 +84,7 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 	}
 
 	fmt.Printf("did not find dir \"%s\" in cache\n", path)
-	
+
 	state := fs.tracker.AddOperation(fmt.Sprintf("ListDir(%s)", path))
 	files, err := fs.connector.ListDir(ctx, path, state)
 	fs.tracker.OperationComplete(state)
@@ -94,13 +94,13 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 		fs.stats.IncListDirFailedCount()
 		return nil, err
 	}
-	
+
 	fmt.Printf("calling IncListDirSuccessCount ------\n")
 	fs.stats.IncListDirSuccessCount()
 
 	fmt.Printf("storing dir \"%s\" in cache\n", path)
 	files.Valid = true
-	
+
 	if cachedDir != nil {
 		// if we reached here, we had a previous snapshot for this dir, and we actually need to clean up the unused entries in the old snapshot
 		err = fs.cleanupOldSnapshot(path, cachedDir, files)
@@ -108,7 +108,7 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 			return nil, err
 		}
 	}
-	
+
 	err = fs.cache.PutListDir(path, files)
 	if err != nil {
 		return nil, err
@@ -135,11 +135,11 @@ func (fs *FS) PrepareForRead(ctx context.Context, path string, etag, localPath s
 
 		fs.stats.IncPrepareForReadSuccessCount()
 		fs.stats.IncBytesRead(int64(prepared.Length))
-		
-		if prepared.Offset > region.Offset || (prepared.Offset + prepared.Length) < (region.Offset + region.Length) {
+
+		if prepared.Offset > region.Offset || (prepared.Offset+prepared.Length) < (region.Offset+region.Length) {
 			return errors.New(fmt.Sprintf("Requested region %s but got %s", region, prepared))
 		}
-		
+
 		fs.cache.AddedRegions(path, prepared.Offset, prepared.Length)
 	}
 
@@ -294,17 +294,17 @@ func StartMount(mountpoint string, filesystem *FS) (*fuse.Conn, *fs.Server, chan
 		close(doneChan)
 	})()
 	log.Println("After server.Serve")
-	
+
 	return c, server, doneChan
 }
 
-func tileRegion(region *Region,  size uint64) []*Region {
-	start := (region.Offset/size) * size
+func tileRegion(region *Region, size uint64) []*Region {
+	start := (region.Offset / size) * size
 	end := ((region.Offset + region.Length + size - 1) / size)
-	tiles := make([]*Region, 0, int((end-start)/size) )
-	for i := start ; i < end ; i += size {
+	tiles := make([]*Region, 0, int((end-start)/size))
+	for i := start; i < end; i += size {
 		tiles = append(tiles, &Region{Offset: i, Length: size})
 	}
-	
+
 	return tiles
 }
