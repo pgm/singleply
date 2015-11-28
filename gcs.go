@@ -3,11 +3,18 @@ package singleply
 import (
 	"fmt"
 	"log"
-
+	"io"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/googleapi"
 	storage "google.golang.org/api/storage/v1"
 )
+
+type GCSConnection struct {
+	bucket  string
+	prefix  string
+	service *storage.ObjectsService
+}
 
 func listAllObjects(service *storage.ObjectsService, bucketName string, prefix string, callback func(objects *storage.Objects) error) error {
 	pageToken := ""
@@ -20,7 +27,12 @@ func listAllObjects(service *storage.ObjectsService, bucketName string, prefix s
 		if err != nil {
 			return err
 		}
-		callback(res)
+		
+		err = callback(res)
+		if err != nil {
+			return err
+		}
+		
 		if pageToken = res.NextPageToken; pageToken == "" {
 			break
 		}
@@ -28,31 +40,33 @@ func listAllObjects(service *storage.ObjectsService, bucketName string, prefix s
 	return nil
 }
 
-type GCSConnection struct {
-	bucket  string
-	prefix  string
-	service *storage.ObjectsService
-}
-
 func (c *GCSConnection) ListDir(context context.Context, path string, status StatusCallback) (*DirEntries, error) {
+	fmt.Printf("ListDir path=%s\n", path)
+
 	files := make([]*FileStat, 0, 100)
 	if path != "" {
 		path = path + "/"
 	}
 	prefix := c.prefix + "/" + path
-	fmt.Printf("ListDir(prefix=\"%s\")\n", prefix)
 
 	// Handle cases where there are objects with keys like "dir/".  "dir" will be both a key and a common prefix
 	// Not sure if this is a bug in fakes3 though, because there should be no key with the name "dir".  However,
 	// filtering to avoid issues with both key and directry with same name
 	dirNames := make(map[string]string)
+	cancelled := true
 
 	err := listAllObjects(c.service, c.bucket, prefix, func(objects *storage.Objects) error {
+		fmt.Printf("listallobjs, objects=%s\n", objects)
+		cancelled = isCanceled(context)
+		if cancelled {
+			fmt.Printf("Canceled\n")
+			return CanceledOperation
+		}
+
 		for _, p := range objects.Prefixes {
 			name := p
 			name = name[len(prefix) : len(name)-1]
 
-			fmt.Printf("Adding dir \"%s\" for prefix %s\n", name, p)
 			files = append(files, &FileStat{Name: name, IsDir: true, Size: uint64(0)})
 			dirNames[name] = name
 		}
@@ -65,7 +79,6 @@ func (c *GCSConnection) ListDir(context context.Context, path string, status Sta
 				continue
 			}
 
-			fmt.Printf("Adding file \"%s\" for key \"%s\"\n", name, object.Name)
 			isDir := false
 
 			if name == "" {
@@ -79,10 +92,12 @@ func (c *GCSConnection) ListDir(context context.Context, path string, status Sta
 		return nil
 
 	})
-
+	
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Printf("Returning files: %s\n", files)
 
 	return &DirEntries{Files: files}, nil
 }
@@ -107,14 +122,19 @@ func NewGCSConnection(bucket string, prefix string) *GCSConnection {
 		log.Fatalf("Unable to create storage service: %v", err)
 	}
 
-	// config := aws.NewConfig().WithCredentials(creds).WithEndpoint(endpoint).WithRegion(region).WithS3ForcePathStyle(true)
-
-	// svc := s3.New(config)
-
 	return &GCSConnection{bucket: bucket, prefix: prefix, service: service.Objects}
 }
 
-func (c *GCSConnection) PrepareForRead(context context.Context, path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
+func isGoogleStatusCode(err error, code int) bool {
+	reqFailure, ok := err.(*googleapi.Error)
+	if !ok {
+		return false
+	}
+	return reqFailure.Code == code
+
+}
+
+func (c *GCSConnection) PrepareForRead(context context.Context, path string, etag string, writer io.WriteSeeker, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
 	key := c.prefix + "/" + path
 
 	// TODO: Add
@@ -122,16 +142,16 @@ func (c *GCSConnection) PrepareForRead(context context.Context, path string, eta
 	//	Key:   &key,
 	//	Range: aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))}
 
-	res, err := c.service.Get(c.bucket, key).IfMatch(etag).Range(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)).Download()
+	res, err := c.service.Get(c.bucket, key).IfMatch(etag).Range(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)).Context(context).Download()
 
 	if err != nil {
-		if isStatusCode(err, 412) {
+		if isGoogleStatusCode(err, 412) {
 			return nil, UpdateDetected
 		}
 		return nil, err
 	}
 
-	err = copyTo(localPath, offset, uint64(res.ContentLength), res.Body)
+	err = copyTo(writer, offset, uint64(res.ContentLength), res.Body)
 	res.Body.Close()
 	if err != nil {
 		return nil, err
@@ -139,3 +159,5 @@ func (c *GCSConnection) PrepareForRead(context context.Context, path string, eta
 
 	return &Region{offset, uint64(res.ContentLength)}, err
 }
+
+

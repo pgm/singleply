@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-
+	"io"
+	
 	"errors"
 
 	"bazil.org/fuse"
@@ -21,7 +22,7 @@ type FileStat struct {
 
 type Connector interface {
 	ListDir(context context.Context, path string, status StatusCallback) (*DirEntries, error)
-	PrepareForRead(context context.Context, path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error)
+	PrepareForRead(context context.Context, path string, etag string, writer io.WriteSeeker, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error)
 }
 
 type Region struct {
@@ -34,10 +35,17 @@ type FS struct {
 	cache     Cache
 	tracker   *Tracker
 	stats     *Stats
+	requestQueue chan *Req
+	blockSize uint64
 }
 
-func NewFileSystem(connector Connector, cache Cache, tracker *Tracker, stats *Stats) *FS {
-	return &FS{connector: connector, cache: cache, tracker: tracker, stats: stats}
+func NewFileSystem(connector Connector, cache Cache, tracker *Tracker, stats *Stats, workers int, blockSize uint64) *FS {
+	queue := make(chan *Req)
+	for i := 0 ;i<workers;i++ {
+		go WorkerLoop(connector, queue)
+
+	}
+	return &FS{connector: connector, cache: cache, tracker: tracker, stats: stats, requestQueue: queue, blockSize: blockSize}
 }
 
 func (f *FS) Root() (fs.Node, error) {
@@ -75,7 +83,7 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 	}
 
 	if cachedDir != nil {
-		fmt.Printf("found dir \"%s\" in cache\n", path)
+		//fmt.Printf("found dir \"%s\" in cache\n", path)
 		if cachedDir.Valid {
 			return cachedDir, nil
 		} else {
@@ -83,7 +91,7 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 		}
 	}
 
-	fmt.Printf("did not find dir \"%s\" in cache\n", path)
+	//fmt.Printf("did not find dir \"%s\" in cache\n", path)
 
 	state := fs.tracker.AddOperation(fmt.Sprintf("ListDir(%s)", path))
 	files, err := fs.connector.ListDir(ctx, path, state)
@@ -95,10 +103,8 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 		return nil, err
 	}
 
-	fmt.Printf("calling IncListDirSuccessCount ------\n")
 	fs.stats.IncListDirSuccessCount()
 
-	fmt.Printf("storing dir \"%s\" in cache\n", path)
 	files.Valid = true
 
 	if cachedDir != nil {
@@ -117,33 +123,103 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 	return files, nil
 }
 
-func (fs *FS) PrepareForRead(ctx context.Context, path string, etag, localPath string, offset uint64, length uint64, status StatusCallback) error {
+type Resp struct {
+	prepared *Region
+	req *Req
+	err error
+}
+
+type Req struct {
+	ctx context.Context
+	path string
+	etag string
+	writer io.WriteSeeker
+	offset uint64
+	length uint64
+	status *State
+
+	// upon completion either an error will be sent back or channel closed
+	response chan *Resp
+}
+
+func WorkerLoop(connector Connector, queue chan *Req) {
 	for {
-		region := fs.cache.GetFirstMissingRegion(path, offset, length)
-		if region == nil {
+		req, ok := <- queue
+		if ! ok {
+			break
+		}
+		
+		prepared, err := connector.PrepareForRead(req.ctx, req.path, req.etag, req.writer, req.offset, req.length, req.status)
+		req.response <- &Resp{prepared: prepared, req: req, err: err}
+	}
+}
+
+func getMissingRegions(cache Cache,  path string, offset uint64, length uint64, blockSize uint64) [] *Region {
+	regionEnd := offset+length
+	missing := make([]*Region, 0, 100)
+	for {
+		next := cache.GetFirstMissingRegion(path, offset, regionEnd-offset)
+		if next == nil {
 			break
 		}
 
-		fmt.Printf("Fetching region %s to fulfill read of (offset: %d, len: %s) for %s\n", region, offset, length, path)
-		state := fs.tracker.AddOperation(fmt.Sprintf("PrepareForRead(%s, %d, %d)", path, region.Offset, region.Length))
-		prepared, err := fs.connector.PrepareForRead(ctx, path, etag, localPath, region.Offset, region.Length, state)
-		fs.tracker.OperationComplete(state)
-		if err != nil {
-			fs.stats.IncPrepareForReadFailedCount()
-			return err
+		// divide missing into chunk sized pieces
+		for start := (next.Offset / blockSize) * blockSize ; start < next.Offset + next.Length ; start += blockSize {
+			missing = append(missing, &Region{start, blockSize})
+			offset = start + blockSize
 		}
+	}
+	
+	return missing
+}
 
-		fs.stats.IncPrepareForReadSuccessCount()
-		fs.stats.IncBytesRead(int64(prepared.Length))
-
-		if prepared.Offset > region.Offset || (prepared.Offset+prepared.Length) < (region.Offset+region.Length) {
-			return errors.New(fmt.Sprintf("Requested region %s but got %s", region, prepared))
-		}
-
-		fs.cache.AddedRegions(path, prepared.Offset, prepared.Length)
+func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writer io.WriteSeeker, offset uint64, length uint64, status StatusCallback) error {
+	regions := getMissingRegions(fs.cache, path, offset, length, fs.blockSize)
+	if len(regions) == 0 {
+		return nil
 	}
 
-	return nil
+	responses := make(chan *Resp)
+	for _, region := range regions {
+		fmt.Printf("Fetching region %s to fulfill read of (offset: %d, len: %s) for %s\n", region, offset, length, path)
+		state := fs.tracker.AddOperation(fmt.Sprintf("PrepareForRead(%s, %d, %d)", path, region.Offset, region.Length))
+		fs.requestQueue <- &Req{ctx: ctx, path: path, etag: etag, writer: writer, offset: offset, length: length, status: state, response: responses}
+	}
+	
+	// block until all workers have responded
+	var finalErr error = nil
+	addedRegions := make([]*Region, 0, 100)
+	for i:=0;i<len(regions);i++ {
+		resp := <- responses
+		
+		fs.tracker.OperationComplete(resp.req.status)
+		if resp.err != nil {
+			fs.stats.IncPrepareForReadFailedCount()
+			if finalErr == nil || resp.err != CanceledOperation {
+				finalErr = resp.err
+			}
+		} else {
+			fs.stats.IncPrepareForReadSuccessCount()
+			prepared := resp.prepared
+			req := resp.req
+			fs.stats.IncBytesRead(int64(prepared.Length))
+
+			if prepared.Offset > req.offset || (prepared.Offset+prepared.Length) < (req.offset+req.length) {
+				return errors.New(fmt.Sprintf("Requested region (%s+%s) but got %s", req.offset, req.length, prepared))
+			}
+			addedRegions = append(addedRegions, prepared)
+		}
+	}
+	
+	for _, prepared := range addedRegions {
+		//err := 
+		fs.cache.AddedRegions(path, prepared.Offset, prepared.Length)
+		//if err != nil {
+		//	return err
+		//}
+	}
+	
+	return finalErr
 }
 
 type FileHandle struct {
@@ -253,8 +329,12 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 	return &FileHandle{path: f.path, fs: f.fs, file: localFile, etag: f.etag}, nil
 }
 
+func NewLocalWriter(name string) io.WriteSeeker {
+		panic("ah")
+}
+
 func (f *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	err := f.fs.PrepareForRead(ctx, f.path, f.etag, f.file.Name(), uint64(req.Offset), uint64(req.Size), nil)
+	err := f.fs.PrepareForRead(ctx, f.path, f.etag, NewLocalWriter(f.file.Name()), uint64(req.Offset), uint64(req.Size), nil)
 	if err != nil {
 		fmt.Printf("PrepareForRead failed: %s\n", err.Error())
 		return err

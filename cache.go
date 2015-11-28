@@ -3,12 +3,12 @@ package singleply
 import (
 	"bytes"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"sync"
 	"time"
-	"os"
-	"errors"
 
 	"github.com/boltdb/bolt"
 )
@@ -120,20 +120,20 @@ func (c *LocalCache) EvictFile(path string) error {
 			}
 
 			localPath = e.LocalPath
-			
+
 			b.Delete(key)
 		}
 		return nil
 	})
-	
+
 	if err != nil {
 		return err
 	}
-	
+
 	if localPath == "" {
 		return NotInCache
 	}
-	
+
 	err = os.Remove(localPath)
 	return err
 }
@@ -170,7 +170,7 @@ func (c *LocalCache) GetLocalFile(path string, length uint64) (string, error) {
 			bb := buffer.Bytes()
 			b.Put(key, bb)
 
-			fmt.Printf("e=%s, writing %s -> len(): %d\n", e, key, len(bb))
+			//fmt.Printf("e=%s, writing %s -> len(): %d\n", e, key, len(bb))
 		} else {
 			var e FileCacheEntry
 
@@ -190,7 +190,6 @@ func (c *LocalCache) GetLocalFile(path string, length uint64) (string, error) {
 }
 
 func (c *LocalCache) GetFirstMissingRegion(path string, offset uint64, length uint64) *Region {
-	fmt.Printf("GetFirstMissingRegion(\"%s\", %d, %d)\n",  path, offset, length)
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -200,7 +199,7 @@ func (c *LocalCache) GetFirstMissingRegion(path string, offset uint64, length ui
 		b := tx.Bucket([]byte(FILE_MAP))
 		key := []byte(path)
 		entryBytes := b.Get(key)
-//		fmt.Printf("in cache, fetched len %d for \"%s\"\n", len(entryBytes), path)
+		//		fmt.Printf("in cache, fetched len %d for \"%s\"\n", len(entryBytes), path)
 		var e FileCacheEntry
 
 		buffer := bytes.NewBuffer(entryBytes)
@@ -251,7 +250,7 @@ func (c *LocalCache) AddedRegions(path string, offset uint64, length uint64) {
 func (c *LocalCache) Invalidate(path string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	
+
 	err := c.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(DIR_MAP))
 		key := []byte(path)
@@ -263,18 +262,18 @@ func (c *LocalCache) Invalidate(path string) error {
 			dec.Decode(&files)
 
 			files.Valid = false
-			
+
 			encbuffer := bytes.NewBuffer(make([]byte, 0, 100))
 			enc := gob.NewEncoder(encbuffer)
 			enc.Encode(files)
-			
+
 			b.Put(key, encbuffer.Bytes())
-			return nil 
+			return nil
 		} else {
 			return NotInCache
 		}
 	})
-	
+
 	return err
 }
 

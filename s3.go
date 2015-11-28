@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -20,18 +20,19 @@ import (
 // }
 
 var BadLength error = errors.New("Bad length read")
+var CanceledOperation error = errors.New("Canceled operation")
 
-func copyTo(localPath string, offset uint64, length uint64, reader io.ReadCloser) error {
+func copyTo(w io.WriteSeeker, offset uint64, length uint64, reader io.ReadCloser) error {
 	defer reader.Close()
 
-	w, err := os.OpenFile(localPath, os.O_RDWR, 0777)
-	if err != nil {
-		return err
-	}
-	//fmt.Printf("copyTo(%s,%d,%d,%s)\n", localPath, offset, length, reader)
-	defer w.Close()
+	// w, err := os.OpenFile(localPath, os.O_RDWR, 0777)
+	// if err != nil {
+	// 	return err
+	// }
+	// //fmt.Printf("copyTo(%s,%d,%d,%s)\n", localPath, offset, length, reader)
+	// defer w.Close()
 
-	_, err = w.Seek(int64(offset), 0)
+	_, err := w.Seek(int64(offset), 0)
 	if err != nil {
 		return err
 	}
@@ -66,7 +67,7 @@ func NewS3Connection(creds *credentials.Credentials, bucket string, prefix strin
 	return &S3Connection{bucket: bucket, prefix: prefix, region: region, endpoint: endpoint, svc: svc}
 }
 
-func isStatusCode(err error, code int) bool {
+func isAwsStatusCode(err error, code int) bool {
 	reqFailure, ok := err.(awserr.RequestFailure)
 	if !ok {
 		return false
@@ -74,7 +75,7 @@ func isStatusCode(err error, code int) bool {
 	return reqFailure.StatusCode() == code
 }
 
-func (c *S3Connection) PrepareForRead(context context.Context, path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
+func (c *S3Connection) PrepareForRead(context context.Context, path string, etag string, writer io.WriteSeeker, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
 	defaults.DefaultConfig.Region = aws.String("us-east-1")
 
 	key := c.prefix + "/" + path
@@ -85,13 +86,13 @@ func (c *S3Connection) PrepareForRead(context context.Context, path string, etag
 
 	result, err := c.svc.GetObject(&input)
 	if err != nil {
-		if isStatusCode(err, 412) {
+		if isAwsStatusCode(err, 412) {
 			return nil, UpdateDetected
 		}
 		return nil, err
 	}
 
-	err = copyTo(localPath, offset, length, result.Body)
+	err = copyTo(writer, offset, length, result.Body)
 
 	if err != nil {
 		return nil, err
@@ -100,28 +101,42 @@ func (c *S3Connection) PrepareForRead(context context.Context, path string, etag
 	return &Region{offset, length}, err
 }
 
+func isCanceled(context context.Context) bool {
+	select {
+		case <- context.Done():
+			return true
+		default:
+			return false
+	}
+}
+
 func (c *S3Connection) ListDir(context context.Context, path string, status StatusCallback) (*DirEntries, error) {
 	files := make([]*FileStat, 0, 100)
 	if path != "" {
 		path = path + "/"
 	}
 	prefix := c.prefix + "/" + path
-	fmt.Printf("ListDir(prefix=\"%s\")\n", prefix)
 	input := s3.ListObjectsInput{Bucket: aws.String(c.bucket), Delimiter: aws.String("/"), Prefix: &prefix}
 
 	// Handle cases where there are objects with keys like "dir/".  "dir" will be both a key and a common prefix
 	// Not sure if this is a bug in fakes3 though, because there should be no key with the name "dir".  However,
 	// filtering to avoid issues with both key and directry with same name
 	dirNames := make(map[string]string)
+	cancelled := true
 
 	err := c.svc.ListObjectsPages(&input, func(p *s3.ListObjectsOutput, lastPage bool) bool {
-		fmt.Printf("ListObjectPages returned %s\n", p)
+		cancelled = isCanceled(context)
+		if cancelled {
+			return false
+		}
+		
+		//fmt.Printf("ListObjectPages returned %s\n", p)
 
 		for _, p := range p.CommonPrefixes {
 			name := *p.Prefix
 			name = name[len(prefix) : len(name)-1]
 
-			fmt.Printf("Adding dir \"%s\" for prefix %s\n", name, (*p.Prefix))
+			//fmt.Printf("Adding dir \"%s\" for prefix %s\n", name, (*p.Prefix))
 			files = append(files, &FileStat{Name: name, IsDir: true, Size: uint64(0)})
 			dirNames[name] = name
 		}
@@ -134,7 +149,7 @@ func (c *S3Connection) ListDir(context context.Context, path string, status Stat
 				continue
 			}
 
-			fmt.Printf("Adding file \"%s\" for key \"%s\"\n", name, (*object.Key))
+			//fmt.Printf("Adding file \"%s\" for key \"%s\"\n", name, (*object.Key))
 			isDir := false
 
 			if name == "" {
@@ -147,6 +162,10 @@ func (c *S3Connection) ListDir(context context.Context, path string, status Stat
 
 		return true
 	})
+
+	if cancelled {
+		return nil, CanceledOperation
+	}
 
 	if err != nil {
 		return nil, err

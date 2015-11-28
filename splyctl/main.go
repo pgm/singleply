@@ -7,7 +7,7 @@ import (
 	"net"
 	"net/rpc"
 	"os"
-	"time"
+	// "time"
 
 	"bazil.org/fuse/fs"
 
@@ -261,16 +261,18 @@ func main() {
 					panic("Needed either GCS bucket or S3 bucket selected")
 				}
 
-				if cfg.Settings.DelaySecs != 0 {
-					connection = singleply.DelayConnector(time.Second*time.Duration(cfg.Settings.DelaySecs), connection)
-				}
+				// if cfg.Settings.DelaySecs != 0 {
+				// 	connection = singleply.DelayConnector(time.Second*time.Duration(cfg.Settings.DelaySecs), connection)
+				// }
 
 				stats := &singleply.Stats{}
 				tracker := singleply.NewTracker()
 				fs := singleply.NewFileSystem(connection,
 					cache,
 					tracker,
-					stats)
+					stats,
+					10,
+					1*1024*1024)
 
 				log.Printf("StartMount\n")
 				fc, server, serveCompleted := singleply.StartMount(cfg.Settings.MountPoint, fs)

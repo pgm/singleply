@@ -5,8 +5,9 @@ import (
 	"io"
 	"os"
 	"time"
+
 	"golang.org/x/net/context"
-	)
+)
 
 // just used for testing.  A connector which claims every dir has the same contents.  And every file contains just its own filename
 type MockConn struct {
@@ -28,7 +29,7 @@ func (c *MockConn) PrepareForRead(ctx context.Context, path string, etag string,
 	return &Region{0, uint64(len(content))}, nil
 }
 
-func (c *MockConn) ListDir(ctx context.Context,path string, status StatusCallback) (*DirEntries, error) {
+func (c *MockConn) ListDir(ctx context.Context, path string, status StatusCallback) (*DirEntries, error) {
 	files := make([]*FileStat, 0, 100)
 	files = append(files, &FileStat{Name: "dir1", IsDir: true, Size: uint64(0)})
 	files = append(files, &FileStat{Name: "dir2", IsDir: true, Size: uint64(0)})
@@ -38,20 +39,20 @@ func (c *MockConn) ListDir(ctx context.Context,path string, status StatusCallbac
 }
 
 type DelayConn struct {
-	delay time.Duration
+	delay      time.Duration
 	underlying Connector
 }
 
-func DelayConnector(delay time.Duration, conn Connector) Connector {
-	return &DelayConn{delay: delay, underlying: conn}
-} 
+// func DelayConnector(delay time.Duration, conn Connector) Connector {
+// 	return &DelayConn{delay: delay, underlying: conn}
+// }
 
-func (c *DelayConn) PrepareForRead(ctx context.Context,path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
-	time.Sleep(c.delay)
-	return c.underlying.PrepareForRead(ctx, path, etag, localPath, offset, length, status)
-}
+// func (c *DelayConn) PrepareForRead(ctx context.Context, path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
+// 	time.Sleep(c.delay)
+// 	return c.underlying.PrepareForRead(ctx, path, etag, localPath, offset, length, status)
+// }
 
-func (c *DelayConn) ListDir(ctx context.Context,path string, status StatusCallback) (*DirEntries, error) {
-	time.Sleep(c.delay)
-	return c.ListDir(ctx, path, status)
-}
+// func (c *DelayConn) ListDir(ctx context.Context, path string, status StatusCallback) (*DirEntries, error) {
+// 	time.Sleep(c.delay)
+// 	return c.ListDir(ctx, path, status)
+// }
