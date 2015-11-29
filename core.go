@@ -42,7 +42,7 @@ type FS struct {
 func NewFileSystem(connector Connector, cache Cache, tracker *Tracker, stats *Stats, workers int, blockSize uint64) *FS {
 	queue := make(chan *Req)
 	for i := 0 ;i<workers;i++ {
-		go WorkerLoop(connector, queue)
+		go WorkerLoop(i, connector, queue)
 
 	}
 	return &FS{connector: connector, cache: cache, tracker: tracker, stats: stats, requestQueue: queue, blockSize: blockSize}
@@ -142,22 +142,34 @@ type Req struct {
 	response chan *Resp
 }
 
-func WorkerLoop(connector Connector, queue chan *Req) {
+func WorkerLoop(index int, connector Connector, queue chan *Req) {
 	for {
+		fmt.Printf("Worker %d waiting\n", index)
+
 		req, ok := <- queue
 		if ! ok {
+			fmt.Printf("!ok, killing worker %d\n", index)
 			break
 		}
 		
+		fmt.Printf("Worker %d handling %s %d +%d\n", index, req.path, req.offset, req.length)
 		prepared, err := connector.PrepareForRead(req.ctx, req.path, req.etag, req.writer, req.offset, req.length, req.status)
+		fmt.Printf("Worker %d completed handling %s %d +%d\n", index, req.path, req.offset, req.length)
 		req.response <- &Resp{prepared: prepared, req: req, err: err}
 	}
 }
 
-func getMissingRegions(cache Cache,  path string, offset uint64, length uint64, blockSize uint64) [] *Region {
+func getMissingRegions(cache Cache, path string, offset uint64, length uint64, fileLength uint64, blockSize uint64) [] *Region {
+	tryCount := 0
+	
 	regionEnd := offset+length
 	missing := make([]*Region, 0, 100)
 	for {
+		tryCount ++
+		if tryCount > 100 {
+			panic("something is wrong")
+		}
+		fmt.Printf("offset=%d, regionEnd=%d, fileLength=%d\n", offset, regionEnd, fileLength)
 		next := cache.GetFirstMissingRegion(path, offset, regionEnd-offset)
 		if next == nil {
 			break
@@ -165,16 +177,27 @@ func getMissingRegions(cache Cache,  path string, offset uint64, length uint64, 
 
 		// divide missing into chunk sized pieces
 		for start := (next.Offset / blockSize) * blockSize ; start < next.Offset + next.Length ; start += blockSize {
-			missing = append(missing, &Region{start, blockSize})
-			offset = start + blockSize
+			end := start + blockSize
+			if end > fileLength {
+				end = fileLength
+			}
+			r := &Region{start, end-start}
+			fmt.Printf("Adding region %d +%d\n", r.Offset, r.Length)
+			missing = append(missing, r)
+			offset = end
+		}
+		if offset >= regionEnd {
+			break
 		}
 	}
 	
 	return missing
 }
 
-func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writer io.WriteSeeker, offset uint64, length uint64, status StatusCallback) error {
-	regions := getMissingRegions(fs.cache, path, offset, length, fs.blockSize)
+func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writer io.WriteSeeker, offset uint64, length uint64, fileLength uint64, status StatusCallback) error {
+	fmt.Printf("getMissingRegions start\n")
+	regions := getMissingRegions(fs.cache, path, offset, length, fileLength, fs.blockSize)
+	fmt.Printf("getMissingRegions end\n")
 	if len(regions) == 0 {
 		return nil
 	}
@@ -183,7 +206,7 @@ func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writ
 	for _, region := range regions {
 		fmt.Printf("Fetching region %s to fulfill read of (offset: %d, len: %s) for %s\n", region, offset, length, path)
 		state := fs.tracker.AddOperation(fmt.Sprintf("PrepareForRead(%s, %d, %d)", path, region.Offset, region.Length))
-		fs.requestQueue <- &Req{ctx: ctx, path: path, etag: etag, writer: writer, offset: offset, length: length, status: state, response: responses}
+		fs.requestQueue <- &Req{ctx: ctx, path: path, etag: etag, writer: writer, offset: region.Offset, length: region.Length, status: state, response: responses}
 	}
 	
 	// block until all workers have responded
@@ -191,9 +214,11 @@ func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writ
 	addedRegions := make([]*Region, 0, 100)
 	for i:=0;i<len(regions);i++ {
 		resp := <- responses
+		fmt.Printf("Received %d out of %d responses\n", i, len(regions))
 		
 		fs.tracker.OperationComplete(resp.req.status)
 		if resp.err != nil {
+			fmt.Printf("error = %s\n", resp.err.Error())
 			fs.stats.IncPrepareForReadFailedCount()
 			if finalErr == nil || resp.err != CanceledOperation {
 				finalErr = resp.err
@@ -227,6 +252,7 @@ type FileHandle struct {
 	fs   *FS
 	file *os.File
 	etag string
+	size uint64
 }
 
 type Dir struct {
@@ -326,15 +352,47 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 		return nil, err
 	}
 
-	return &FileHandle{path: f.path, fs: f.fs, file: localFile, etag: f.etag}, nil
+	return &FileHandle{path: f.path, fs: f.fs, file: localFile, etag: f.etag, size: f.size}, nil
+}
+
+type LocalWriter struct {
+	name string
+	offset int64
 }
 
 func NewLocalWriter(name string) io.WriteSeeker {
-		panic("ah")
+	return &LocalWriter{name: name, offset: 0}
+}
+
+func (w *LocalWriter) Seek(offset int64, whence int) (int64, error) {
+	if whence != 0 {
+		panic("unsupported")
+	}
+	w.offset = offset
+	return offset, nil
+}
+
+func (w *LocalWriter) Write(p []byte) (n int, err error) {
+	fd, err := os.OpenFile(w.name, os.O_RDWR, 0777)
+	if err != nil {
+		return 0, err
+	}
+	defer fd.Close()
+	
+	_, err = fd.Seek(w.offset, 0)
+	if err != nil {
+		return 0, err
+	}
+//	fmt.Printf("write offset=%d, len(p)=%d, buffer=% x\n", w.offset, len(p), p)
+	n, err = fd.Write(p)
+	w.offset += int64(n)
+	return n, err
 }
 
 func (f *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	err := f.fs.PrepareForRead(ctx, f.path, f.etag, NewLocalWriter(f.file.Name()), uint64(req.Offset), uint64(req.Size), nil)
+	fmt.Printf("(Read) Writing to %s\n", f.file.Name())
+	lw := NewLocalWriter(f.file.Name())
+	err := f.fs.PrepareForRead(ctx, f.path, f.etag, lw, uint64(req.Offset), uint64(req.Size), f.size, nil)
 	if err != nil {
 		fmt.Printf("PrepareForRead failed: %s\n", err.Error())
 		return err
@@ -343,6 +401,7 @@ func (f *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse
 	buffer := make([]byte, req.Size)
 	n, err := f.file.ReadAt(buffer, req.Offset)
 	if err != nil {
+		fmt.Printf("ReadAt returned error: %s\n", err.Error())
 		return err
 	}
 
@@ -378,13 +437,13 @@ func StartMount(mountpoint string, filesystem *FS) (*fuse.Conn, *fs.Server, chan
 	return c, server, doneChan
 }
 
-func tileRegion(region *Region, size uint64) []*Region {
-	start := (region.Offset / size) * size
-	end := ((region.Offset + region.Length + size - 1) / size)
-	tiles := make([]*Region, 0, int((end-start)/size))
-	for i := start; i < end; i += size {
-		tiles = append(tiles, &Region{Offset: i, Length: size})
-	}
+// func tileRegion(region *Region, size uint64) []*Region {
+// 	start := (region.Offset / size) * size
+// 	end := ((region.Offset + region.Length + size - 1) / size)
+// 	tiles := make([]*Region, 0, int((end-start)/size))
+// 	for i := start; i < end; i += size {
+// 		tiles = append(tiles, &Region{Offset: i, Length: size})
+// 	}
 
-	return tiles
-}
+// 	return tiles
+// }
