@@ -9,8 +9,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/defaults"
+//	"github.com/aws/aws-sdk-go/aws/defaults"
 	"github.com/aws/aws-sdk-go/service/s3"
+    "github.com/aws/aws-sdk-go/aws/session"
+
 )
 
 // type Connector interface {
@@ -60,7 +62,7 @@ var UpdateDetected error = errors.New("Detected change to file")
 func NewS3Connection(creds *credentials.Credentials, bucket string, prefix string, region string, endpoint string) *S3Connection {
 	config := aws.NewConfig().WithCredentials(creds).WithEndpoint(endpoint).WithRegion(region).WithS3ForcePathStyle(true)
 
-	svc := s3.New(config)
+	svc := s3.New(session.New(), config)
 
 	return &S3Connection{bucket: bucket, prefix: prefix, region: region, endpoint: endpoint, svc: svc}
 }
@@ -74,7 +76,7 @@ func isStatusCode(err error, code int) bool {
 }
 
 func (c *S3Connection) PrepareForRead(path string, etag string, localPath string, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error) {
-	defaults.DefaultConfig.Region = aws.String("us-east-1")
+//	defaults.DefaultConfig.Region = aws.String("us-east-1")
 
 	key := c.prefix + "/" + path
 	input := s3.GetObjectInput{Bucket: &c.bucket,
