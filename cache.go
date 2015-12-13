@@ -18,27 +18,6 @@ type FileCacheEntry struct {
 	Valid     *RegionSet
 }
 
-type RegionSet struct {
-	Regions []Region
-}
-
-// dumb implementation
-func (rs *RegionSet) add(region Region) {
-	rs.Regions = append(rs.Regions, region)
-}
-
-func (rs *RegionSet) firstMissing(region Region) *Region {
-	remainder := &region
-
-	for _, r := range rs.Regions {
-		remainder = remainder.FirstNonOverlap(&r)
-		if remainder == nil {
-			return nil
-		}
-	}
-
-	return remainder
-}
 
 type DirEntries struct {
 	Valid bool
@@ -161,7 +140,7 @@ func (c *LocalCache) GetLocalFile(path string, length uint64) (string, error) {
 
 			buffer := bytes.NewBuffer(make([]byte, 0, 100))
 			enc := gob.NewEncoder(buffer)
-			e := &FileCacheEntry{LocalPath: localPath, Valid: &RegionSet{Regions: make([]Region, 0)}}
+			e := &FileCacheEntry{LocalPath: localPath, Valid: NewRegionSet()}
 			err = enc.Encode(e)
 			if err != nil {
 				return err

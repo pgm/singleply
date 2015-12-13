@@ -25,11 +25,6 @@ type Connector interface {
 	PrepareForRead(context context.Context, path string, etag string, writer io.WriteSeeker, offset uint64, length uint64, status StatusCallback) (prepared *Region, err error)
 }
 
-type Region struct {
-	Offset uint64
-	Length uint64
-}
-
 type FS struct {
 	connector Connector
 	cache     Cache
@@ -42,8 +37,7 @@ type FS struct {
 func NewFileSystem(connector Connector, cache Cache, tracker *Tracker, stats *Stats, workers int, blockSize uint64) *FS {
 	queue := make(chan *Req)
 	for i := 0 ;i<workers;i++ {
-		go WorkerLoop(i, connector, queue)
-
+		go WorkerLoop(stats, i, connector, queue)
 	}
 	return &FS{connector: connector, cache: cache, tracker: tracker, stats: stats, requestQueue: queue, blockSize: blockSize}
 }
@@ -142,7 +136,7 @@ type Req struct {
 	response chan *Resp
 }
 
-func WorkerLoop(index int, connector Connector, queue chan *Req) {
+func WorkerLoop(stats *Stats, index int, connector Connector, queue chan *Req) {
 	for {
 		fmt.Printf("Worker %d waiting\n", index)
 
@@ -153,6 +147,7 @@ func WorkerLoop(index int, connector Connector, queue chan *Req) {
 		}
 		
 		fmt.Printf("Worker %d handling %s %d +%d\n", index, req.path, req.offset, req.length)
+		stats.RecordConnectorReadLen(req.length)
 		prepared, err := connector.PrepareForRead(req.ctx, req.path, req.etag, req.writer, req.offset, req.length, req.status)
 		fmt.Printf("Worker %d completed handling %s %d +%d\n", index, req.path, req.offset, req.length)
 		req.response <- &Resp{prepared: prepared, req: req, err: err}
@@ -195,9 +190,9 @@ func getMissingRegions(cache Cache, path string, offset uint64, length uint64, f
 }
 
 func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writer io.WriteSeeker, offset uint64, length uint64, fileLength uint64, status StatusCallback) error {
-	fmt.Printf("getMissingRegions start\n")
+	fs.stats.RecordReadRequestLen(length)
+
 	regions := getMissingRegions(fs.cache, path, offset, length, fileLength, fs.blockSize)
-	fmt.Printf("getMissingRegions end\n")
 	if len(regions) == 0 {
 		return nil
 	}
@@ -237,11 +232,7 @@ func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writ
 	}
 	
 	for _, prepared := range addedRegions {
-		//err := 
 		fs.cache.AddedRegions(path, prepared.Offset, prepared.Length)
-		//if err != nil {
-		//	return err
-		//}
 	}
 	
 	return finalErr
@@ -437,13 +428,3 @@ func StartMount(mountpoint string, filesystem *FS) (*fuse.Conn, *fs.Server, chan
 	return c, server, doneChan
 }
 
-// func tileRegion(region *Region, size uint64) []*Region {
-// 	start := (region.Offset / size) * size
-// 	end := ((region.Offset + region.Length + size - 1) / size)
-// 	tiles := make([]*Region, 0, int((end-start)/size))
-// 	for i := start; i < end; i += size {
-// 		tiles = append(tiles, &Region{Offset: i, Length: size})
-// 	}
-
-// 	return tiles
-// }

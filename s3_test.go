@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os/exec"
 	"time"
+	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -138,10 +139,14 @@ func (s *S3Suite) TestS3ModifyDuringRead(c *C) {
 	localPath := localFile.Name()
 	localFile.Close()
 
+	localPathWriter, err := os.OpenFile(localPath, os.O_RDWR, 0)
+	c.Assert(err, IsNil)
+	defer localPathWriter.Close()
+
 	status := &NullStatusCallback{}
 
 	// Perform a read
-	region, err := conn.PrepareForRead(ctx, "banana", f.Etag, localPath, 0, 10, status)
+	region, err := conn.PrepareForRead(ctx, "banana", f.Etag, localPathWriter, 0, 10, status)
 	c.Assert(err, IsNil)
 	c.Assert(region.Offset, Equals, uint64(0))
 	c.Assert(region.Length, Equals, uint64(10))
@@ -155,7 +160,7 @@ func (s *S3Suite) TestS3ModifyDuringRead(c *C) {
 	s.svc.PutObject(&putObject)
 
 	// try a read, and we should get a failure because data changed, and hence Etag
-	_, err = conn.PrepareForRead(ctx, "banana", f.Etag, localPath, 10, 20, status)
+	_, err = conn.PrepareForRead(ctx, "banana", f.Etag, localPathWriter, 10, 20, status)
 	c.Assert(err, Equals, UpdateDetected)
 }
 

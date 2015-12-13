@@ -3,6 +3,7 @@ package singleply
 import (
 	"fmt"
 	"sync/atomic"
+	"sync"
 )
 
 type Stats struct {
@@ -15,6 +16,22 @@ type Stats struct {
 	FilesEvicted               int32
 	GotStaleDirCount           int32
 	InvalidatedDirCount        int32
+
+	lock sync.Mutex
+	ReadRequestLengths []uint64
+	ConnectorReadLengths []uint64
+}
+
+func (s *Stats) RecordConnectorReadLen(length uint64) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.ConnectorReadLengths = append(s.ConnectorReadLengths, length)
+}
+
+func (s *Stats) RecordReadRequestLen(length uint64) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.ReadRequestLengths = append(s.ReadRequestLengths, length)
 }
 
 func (s *Stats) IncInvalidatedDirCount() {

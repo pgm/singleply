@@ -2,7 +2,7 @@ package singleply
 
 import (
 	"fmt"
-
+	"os"
 	"io/ioutil"
 
 	"bytes"
@@ -65,8 +65,11 @@ func (s *GCSSuite) TestGCSSuite(c *C) {
 
 	localPath := c.MkDir() + "/dest"
 	ioutil.WriteFile(localPath, make([]byte, 0), 0700)
-
-	region, err := connection.PrepareForRead(ctx, "sample", found.Etag, localPath, 0, 10, status)
+	localPathWriter, err := os.OpenFile(localPath, os.O_RDWR, 0)
+	c.Assert(err, IsNil)
+	defer localPathWriter.Close()
+	
+	region, err := connection.PrepareForRead(ctx, "sample", found.Etag, localPathWriter, 0, 10, status)
 	c.Assert(err, IsNil)
 	c.Assert(region.Offset, Equals, uint64(0))
 	c.Assert(region.Length, Equals, uint64(10))
@@ -74,6 +77,6 @@ func (s *GCSSuite) TestGCSSuite(c *C) {
 	insertDummyObj(service, bucket, "a/sample", 1010)
 
 	// this should generate an error because the file is different than when we started reading
-	region, err = connection.PrepareForRead(ctx, "sample", found.Etag, localPath, 990, 10, status)
+	region, err = connection.PrepareForRead(ctx, "sample", found.Etag, localPathWriter, 990, 10, status)
 	c.Assert(err, Equals, UpdateDetected)
 }
