@@ -17,6 +17,20 @@ func NewRegionSet() *RegionSet {
 	return &RegionSet{Regions: make([]Region, 0)}
 }
 
+func (rs *RegionSet) isConsistent() bool {
+	if len(rs.Regions) < 2 {
+		return true
+	}
+	prevStop := rs.Regions[0].Offset + rs.Regions[0].Length 
+	for i := 1; i < len(rs.Regions) ; i++ {
+		if prevStop >= rs.Regions[i].Offset {
+			return false
+		}
+		prevStop = rs.Regions[i].Offset + rs.Regions[i].Length 
+	}
+	return true
+}
+
 func (rs *RegionSet) findIndexContaining(offset uint64) (int, bool) {
 	for i := 0 ; i < len(rs.Regions) ; i++ {
 		if rs.Regions[i].Offset <= offset && (rs.Regions[i].Length + rs.Regions[i].Offset) >= offset {
@@ -31,7 +45,7 @@ func (rs *RegionSet) findIndexContaining(offset uint64) (int, bool) {
 }
 
 func cloneWithReplacement(regions []Region, startIndex int, stopIndex int, newRegion Region) []Region {
-	fmt.Printf("cloneWithReplacement(..., %d, %d, %s)\n", startIndex, stopIndex, newRegion)
+//	fmt.Printf("cloneWithReplacement(..., %d, %d, %s)\n", startIndex, stopIndex, newRegion)
 	l := make([]Region, 0, len(regions)+1)
 	l = append(l, regions[:startIndex]...)
 	l = append(l, newRegion)
@@ -40,9 +54,11 @@ func cloneWithReplacement(regions []Region, startIndex int, stopIndex int, newRe
 
 // dumb implementation
 func (rs *RegionSet) add(region Region) {
-	fmt.Printf("Adding %s\n", region)
+	if ! rs.isConsistent() {
+		panic(fmt.Sprintf("Before adding %s, region set was inconsistent: %s\n", region, rs))
+	}
 	startIndex, containsStart := rs.findIndexContaining(region.Offset)
-	fmt.Printf("startIndex=%d\n", startIndex)
+//	fmt.Printf("startIndex=%d\n", startIndex)
 	stop := region.Offset + region.Length
 
 	if !containsStart {
@@ -53,7 +69,7 @@ func (rs *RegionSet) add(region Region) {
 				region.Offset = rs.Regions[startIndex-1].Offset
 				region.Length = stop - region.Offset
 				startIndex -= 1
-				fmt.Printf("Overlap at start\n")
+//				fmt.Printf("Overlap at start\n")
 			} else {
 				// gap between previous and this region
 				//startIndex += 1
@@ -65,13 +81,13 @@ func (rs *RegionSet) add(region Region) {
 	}
 	
 	stopIndex, containsStop := rs.findIndexContaining(stop)
-	fmt.Printf("stopIndex = %d\n", stopIndex)
+//	fmt.Printf("stopIndex = %d\n", stopIndex)
 	if ! containsStop {
 		if stopIndex+1 < len(rs.Regions) {
-			fmt.Printf("stop = %d, rs.Regions[stopIndex].Offset=%d\n", stop, rs.Regions[stopIndex+1].Offset)
+//			fmt.Printf("stop = %d, rs.Regions[stopIndex].Offset=%d\n", stop, rs.Regions[stopIndex+1].Offset)
 			if stop >= rs.Regions[stopIndex+1].Offset {
 				// overlaps at the end, so take the length to the end
-				fmt.Printf("Overlap at end, so taking length to the end\n")
+//				fmt.Printf("Overlap at end, so taking length to the end\n")
 				region.Length = (rs.Regions[stopIndex+1].Offset + rs.Regions[stopIndex+1].Length) - region.Offset
 				stopIndex += 1
 			} else {
@@ -81,8 +97,11 @@ func (rs *RegionSet) add(region Region) {
 		region.Length = (rs.Regions[stopIndex].Offset + rs.Regions[stopIndex].Length) - region.Offset
 		stopIndex += 1
 	}
-	
+	originalRegions := rs.Regions	
 	rs.Regions = cloneWithReplacement(rs.Regions, startIndex, stopIndex, region)
+	if ! rs.isConsistent() {
+		panic(fmt.Sprintf("After adding %s, region set became inconsistent: before=%s, after=%s\n", region, asStr(originalRegions), asStr(rs.Regions)))
+	}	
 }
 
 func (rs *RegionSet) firstMissing(region Region) *Region {
