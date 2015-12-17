@@ -100,7 +100,7 @@ func (rs *RegionSet) add(region Region) {
 	originalRegions := rs.Regions	
 	rs.Regions = cloneWithReplacement(rs.Regions, startIndex, stopIndex, region)
 	if ! rs.isConsistent() {
-		panic(fmt.Sprintf("After adding %s, region set became inconsistent: before=%s, after=%s\n", region, asStr(originalRegions), asStr(rs.Regions)))
+		panic(fmt.Sprintf("After adding %s, region set became inconsistent: before=%s, after=%s\n", region, RegionSet{Regions: originalRegions}, rs))
 	}	
 }
 

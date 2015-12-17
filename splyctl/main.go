@@ -8,8 +8,10 @@ import (
 	"net/rpc"
 	"os"
 	// "time"
-
-	"bazil.org/fuse/fs"
+	
+	"golang.org/x/net/context"
+	"bazil.org/fuse/fs"	
+	"bazil.org/fuse"
 
 	_ "bazil.org/fuse/fs/fstestutil"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -24,7 +26,7 @@ type SplyClient struct {
 	tracker *singleply.Tracker
 	cache   singleply.Cache
 	server  *fs.Server
-	fs      fs.FS
+	fs      *singleply.FS
 }
 
 func (c *SplyClient) GetStats(args *string, result **string) error {
@@ -74,13 +76,15 @@ func (c *SplyClient) GetLocal(args *string, result **string) error {
 */
 
 func (c *SplyClient) Invalidate(path string, result **string) error {
-	// TODO: Clear kernel cache
-	// c.server.InvalidateNodeData()
-	// c.server.InvalidateEntry()
-
+	fmt.Printf("Calling c.cache.Invalidate\n")
 	err := c.cache.Invalidate(path)
+	if err == nil {
+		fmt.Printf("Calling fs.Invalidate\n")
+		err = c.fs.Invalidate(context.Background(), c.server, path)
+	}
+
 	var r string
-	if err != nil {
+	if err != nil && err != fuse.ErrNotCached {
 		r = err.Error()
 	} else {
 		c.stats.IncInvalidatedDirCount()
@@ -149,11 +153,20 @@ type Config struct {
 		CacheDir    string
 		ControlFile string
 		DelaySecs   int
+		Workers     int
+		FetchSize   int
 	}
 }
 
-func loadConfig(configFile string) *Config {
+func loadConfig(c *cli.Context) *Config {
+	return _loadConfig( c.GlobalString("config") )
+	
+}
+
+func _loadConfig(configFile string) *Config {
 	cfg := Config{}
+	cfg.Settings.Workers = 5
+	cfg.Settings.FetchSize = 1024*1024
 
 	fd, err := os.Open(configFile)
 	if err != nil {
@@ -172,19 +185,23 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "splymnt"
 	app.Usage = "splymnt fuse client"
-	// app.Flags = []cli.Flag{
-	// 	&cli.StringFlag{Name: "dev", Value: "", Usage: "Enable development mode.  Root service, local service and fuse client all run in-process."},
-	// }
+	
+	// TODO: use ~/.splyctl as config file by default and add command line arg to override 
+	// Streamline logging strategy
+	// support invalidate
+	
+	app.Flags = []cli.Flag{
+	 	&cli.StringFlag{Name: "config", Value: "~/.splyctl", Usage: "Path to config file"},
+	}
 
 	// todo: add commands "mount", "status"
 	app.Commands = []cli.Command{
 		{
 			Name:  "invalidate",
-			Usage: "invalidate configfile relpath",
+			Usage: "invalidate relpath",
 			Action: func(c *cli.Context) {
-				configFile := c.Args().Get(0)
-				path := c.Args().Get(1)
-				cfg := loadConfig(configFile)
+				path := c.Args().Get(0)
+				cfg := loadConfig(c)
 				client := ConnectToServer(cfg.Settings.ControlFile)
 				var result *string
 				err := client.Call("SplyClient.Invalidate", path, &result)
@@ -197,9 +214,8 @@ func main() {
 			Name:  "local",
 			Usage: "invalidate configfile relpath",
 			Action: func(c *cli.Context) {
-				configFile := c.Args().Get(0)
-				path := c.Args().Get(1)
-				cfg := loadConfig(configFile)
+				path := c.Args().Get(0)
+				cfg := loadConfig(c)
 				client := ConnectToServer(cfg.Settings.ControlFile)
 				var result *string
 				err := client.Call("SplyClient.GetLocal", path, &result)
@@ -212,8 +228,7 @@ func main() {
 			Name:  "status",
 			Usage: "status configfile",
 			Action: func(c *cli.Context) {
-				configFile := c.Args().Get(0)
-				cfg := loadConfig(configFile)
+				cfg := loadConfig(c)
 				client := ConnectToServer(cfg.Settings.ControlFile)
 				unused := ""
 				var result *string
@@ -227,8 +242,7 @@ func main() {
 			Name:  "stats",
 			Usage: "stats configfile",
 			Action: func(c *cli.Context) {
-				configFile := c.Args().Get(0)
-				cfg := loadConfig(configFile)
+				cfg := loadConfig(c)
 				client := ConnectToServer(cfg.Settings.ControlFile)
 				unused := ""
 				var result *string
@@ -240,11 +254,9 @@ func main() {
 			}},
 		{
 			Name:  "mount",
-			Usage: "mount configfile",
+			Usage: "mount",
 			Action: func(c *cli.Context) {
-				configFile := c.Args().Get(0)
-
-				cfg := loadConfig(configFile)
+				cfg := loadConfig(c)
 
 				cache, err := singleply.NewLocalCache(cfg.Settings.CacheDir)
 				if err != nil {

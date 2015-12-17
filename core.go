@@ -5,6 +5,9 @@ import (
 	"log"
 	"os"
 	"io"
+	"sync"
+	"path"
+	"strings"
 	
 	"errors"
 
@@ -12,6 +15,8 @@ import (
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
 )
+
+var InvalidPathError error = errors.New("Invalid path")
 
 type FileStat struct {
 	IsDir bool
@@ -43,7 +48,41 @@ func NewFileSystem(connector Connector, cache Cache, tracker *Tracker, stats *St
 }
 
 func (f *FS) Root() (fs.Node, error) {
-	return &Dir{path: "", fs: f}, nil
+	return &Dir{path: "", fs: f, childrenInUse: make(map[string] fs.Node)}, nil
+}
+
+func (f *FS) Invalidate(ctx context.Context, server *fs.Server, path string) error {
+	if path[0] != '/' {
+		return errors.New("Path must start with slash")
+	}
+
+	node, err := f.Root()
+	//fmt.Printf("node=%s, err=%s\n", node, err)
+	if err != nil {
+		return err
+	}
+	
+	if path != "/" {
+	// drop leading slash
+		path = path[1:]
+		components := strings.Split(path, "/")
+		//fmt.Printf("components=%s, node=%s, err=%s\n", components, node, err)
+		for _, component := range(components) {
+			dir, isDir := node.(*Dir)
+			if !isDir {
+				return InvalidPathError
+			}
+			nextNode, err := dir.lookupInUse(ctx, component)
+			if err != nil {
+				return err
+			}
+			node = nextNode
+		}
+	}
+	
+	err = server.InvalidateNodeData(node)
+	//fmt.Printf("node=%s\n", node, err)
+	return err
 }
 
 func (fs *FS) cleanupOldSnapshot(path string, oldFiles *DirEntries, newFiles *DirEntries) error {
@@ -249,6 +288,10 @@ type FileHandle struct {
 type Dir struct {
 	path string
 	fs   *FS
+	parent *Dir
+	
+	lock sync.Mutex
+	childrenInUse map[string] fs.Node
 }
 
 type File struct {
@@ -256,6 +299,7 @@ type File struct {
 	fs   *FS
 	size uint64
 	etag string
+	parent *Dir
 }
 
 func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
@@ -264,31 +308,53 @@ func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	return nil
 }
 
+func (d *Dir) lookupInUse(ctx context.Context, name string) (fs.Node, error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	node, hasNode := d.childrenInUse[name]
+	if !hasNode {
+		return nil, fuse.ErrNotCached
+	}
+
+	return node, nil
+}
+
 func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
-	files, err := d.fs.ListDir(ctx, d.path)
-	if err != nil {
-		return nil, err
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	node, hasNode := d.childrenInUse[name]
+	if !hasNode {
+		files, err := d.fs.ListDir(ctx, d.path)
+		if err != nil {
+			return nil, err
+		}
+	
+		entry := files.Get(name)
+		if entry == nil {
+			//if len(files.Files) == 0 {
+			fmt.Printf("Could not find entry for \"%s\" among %d entries for %s\n", name, len(files.Files), d.path)
+			//}
+			return nil, fuse.ENOENT
+		}
+	
+		var childName string
+		if d.path == "" {
+			childName = name
+		} else {
+			childName = d.path + "/" + name
+		}
+		
+		if entry.IsDir {
+			node = &Dir{parent: d, path: childName, fs: d.fs, childrenInUse: make(map[string] fs.Node)}
+		} else {
+			node = &File{parent: d, path: childName, fs: d.fs, size: entry.Size, etag: entry.Etag}
+		}
+		d.childrenInUse[name] = node
 	}
 
-	entry := files.Get(name)
-	if entry == nil {
-		//if len(files.Files) == 0 {
-		fmt.Printf("Could not find entry for \"%s\" among %d entries for %s\n", name, len(files.Files), d.path)
-		//}
-		return nil, fuse.ENOENT
-	}
-
-	var childName string
-	if d.path == "" {
-		childName = name
-	} else {
-		childName = d.path + "/" + name
-	}
-	if entry.IsDir {
-		return &Dir{path: childName, fs: d.fs}, nil
-	} else {
-		return &File{path: childName, fs: d.fs, size: entry.Size, etag: entry.Etag}, nil
-	}
+	return node, nil
 }
 
 func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
@@ -316,6 +382,26 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 	fmt.Printf("returning Dirent with %d entries\n", len(dirDirs))
 	return dirDirs, nil
+}
+
+func (f *File) Forget() {
+	if f.parent == nil {
+		return
+	}
+	name := path.Base(f.path)
+	f.parent.lock.Lock()
+	defer f.parent.lock.Unlock()
+	delete(f.parent.childrenInUse, name)
+}
+
+func (f *Dir) Forget() {
+	if f.parent == nil {
+		return
+	}
+	name := path.Base(f.path)
+	f.parent.lock.Lock()
+	defer f.parent.lock.Unlock()
+	delete(f.parent.childrenInUse, name)
 }
 
 func (f *FileHandle) Forget() {
