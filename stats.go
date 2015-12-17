@@ -1,7 +1,6 @@
 package singleply
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 )
@@ -25,13 +24,17 @@ type Stats struct {
 func (s *Stats) RecordConnectorReadLen(length uint64) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.ConnectorReadLengths = append(s.ConnectorReadLengths, length)
+	if len(s.ConnectorReadLengths) < 1000 {
+		s.ConnectorReadLengths = append(s.ConnectorReadLengths, length)
+	}
 }
 
 func (s *Stats) RecordReadRequestLen(length uint64) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.ReadRequestLengths = append(s.ReadRequestLengths, length)
+	if len(s.ReadRequestLengths) < 1000 {
+		s.ReadRequestLengths = append(s.ReadRequestLengths, length)
+	}
 }
 
 func (s *Stats) IncInvalidatedDirCount() {
@@ -43,8 +46,7 @@ func (s *Stats) IncGotStaleDirCount() {
 }
 
 func (s *Stats) IncListDirSuccessCount() {
-	v := atomic.AddInt32(&s.ListDirSuccessCount, 1)
-	fmt.Printf("IncListDirSuccessCount() -> %d\n", v)
+	atomic.AddInt32(&s.ListDirSuccessCount, 1)
 }
 
 func (s *Stats) IncFilesEvicted() {

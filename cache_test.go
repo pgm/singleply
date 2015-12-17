@@ -3,6 +3,7 @@ package singleply
 import (
 	"fmt"
 	"testing"
+	"os"
 
 	. "gopkg.in/check.v1"
 )
@@ -12,7 +13,10 @@ type CacheSuite struct{}
 var _ = Suite(&CacheSuite{})
 var _ = fmt.Sprintf("hello!")
 
-func Test(t *testing.T) { TestingT(t) }
+func Test(t *testing.T) { 
+	InitLogging(100, os.Stderr)
+	TestingT(t) 
+}
 
 func (r *Region) str() string {
 	return fmt.Sprintf("%d:%d", r.Offset, r.Length)

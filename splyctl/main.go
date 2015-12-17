@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"os/user"
 	// "time"
 
 	"bazil.org/fuse"
@@ -159,11 +160,21 @@ type Config struct {
 }
 
 func loadConfig(c *cli.Context) *Config {
-	return _loadConfig(c.GlobalString("config"))
+	verbosity := c.GlobalInt("verbose")
+	singleply.InitLogging(verbosity, os.Stderr)
 
+	return _loadConfig(c.GlobalString("config"))
 }
 
 func _loadConfig(configFile string) *Config {
+	if configFile[:2] == "~/" {
+		usr, err := user.Current()
+		if err != nil {
+			log.Fatalf("Could not get current user: %s", err)
+		}
+		configFile = configFile[1:] + usr.HomeDir
+	}
+
 	cfg := Config{}
 	cfg.Settings.Workers = 5
 	cfg.Settings.FetchSize = 1024 * 1024
@@ -186,15 +197,11 @@ func main() {
 	app.Name = "splymnt"
 	app.Usage = "splymnt fuse client"
 
-	// TODO: use ~/.splyctl as config file by default and add command line arg to override
-	// Streamline logging strategy
-	// support invalidate
-
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{Name: "config", Value: "~/.splyctl", Usage: "Path to config file"},
+		&cli.IntFlag{Name: "verbose", Value: 0, Usage: "Value from 0-4, larger values are more verbose"},
 	}
 
-	// todo: add commands "mount", "status"
 	app.Commands = []cli.Command{
 		{
 			Name:  "invalidate",
@@ -286,10 +293,8 @@ func main() {
 					10,
 					1*1024*1024)
 
-				log.Printf("StartMount\n")
 				fc, server, serveCompleted := singleply.StartMount(cfg.Settings.MountPoint, fs)
 				defer fc.Close()
-				log.Printf("StartMount completed\n")
 
 				client := SplyClient{stats: stats, tracker: tracker, cache: cache, server: server, fs: fs}
 
@@ -297,8 +302,6 @@ func main() {
 				if err != nil {
 					panic(err.Error())
 				}
-
-				log.Printf("StartServer completed\n")
 
 				// check if the mount process has an error to report
 				<-fc.Ready

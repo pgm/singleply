@@ -3,6 +3,7 @@ package singleply
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -15,6 +16,11 @@ import (
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
 )
+
+var Debug *log.Logger
+var Info *log.Logger
+var Warn *log.Logger
+var Error *log.Logger
 
 var InvalidPathError error = errors.New("Invalid path")
 
@@ -57,7 +63,7 @@ func (f *FS) Invalidate(ctx context.Context, server *fs.Server, path string) err
 	}
 
 	node, err := f.Root()
-	//fmt.Printf("node=%s, err=%s\n", node, err)
+	//Warn.Printf("node=%s, err=%s\n", node, err)
 	if err != nil {
 		return err
 	}
@@ -66,7 +72,7 @@ func (f *FS) Invalidate(ctx context.Context, server *fs.Server, path string) err
 		// drop leading slash
 		path = path[1:]
 		components := strings.Split(path, "/")
-		//fmt.Printf("components=%s, node=%s, err=%s\n", components, node, err)
+		//Warn.Printf("components=%s, node=%s, err=%s\n", components, node, err)
 		for _, component := range components {
 			dir, isDir := node.(*Dir)
 			if !isDir {
@@ -81,7 +87,7 @@ func (f *FS) Invalidate(ctx context.Context, server *fs.Server, path string) err
 	}
 
 	err = server.InvalidateNodeData(node)
-	//fmt.Printf("node=%s\n", node, err)
+	//Warn.Printf("node=%s\n", node, err)
 	return err
 }
 
@@ -111,12 +117,11 @@ func (fs *FS) cleanupOldSnapshot(path string, oldFiles *DirEntries, newFiles *Di
 func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 	cachedDir, err := fs.cache.GetListDir(path)
 	if err != nil {
-		fmt.Printf("cache.GetListDir returned error: %s\n", err.Error())
+		Warn.Printf("cache.GetListDir returned error: %s\n", err.Error())
 		return nil, err
 	}
 
 	if cachedDir != nil {
-		//fmt.Printf("found dir \"%s\" in cache\n", path)
 		if cachedDir.Valid {
 			return cachedDir, nil
 		} else {
@@ -124,14 +129,12 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 		}
 	}
 
-	//fmt.Printf("did not find dir \"%s\" in cache\n", path)
-
 	state := fs.tracker.AddOperation(fmt.Sprintf("ListDir(%s)", path))
 	files, err := fs.connector.ListDir(ctx, path, state)
 	fs.tracker.OperationComplete(state)
 
 	if err != nil {
-		fmt.Printf("ListDir returned error: %s\n", err.Error())
+		Warn.Printf("ListDir returned error: %s\n", err.Error())
 		fs.stats.IncListDirFailedCount()
 		return nil, err
 	}
@@ -177,18 +180,18 @@ type Req struct {
 
 func WorkerLoop(stats *Stats, index int, connector Connector, queue chan *Req) {
 	for {
-		fmt.Printf("Worker %d waiting\n", index)
+		Warn.Printf("Worker %d waiting\n", index)
 
 		req, ok := <-queue
 		if !ok {
-			fmt.Printf("!ok, killing worker %d\n", index)
+			Warn.Printf("!ok, killing worker %d\n", index)
 			break
 		}
 
-		fmt.Printf("Worker %d handling %s %d +%d\n", index, req.path, req.offset, req.length)
+		Warn.Printf("Worker %d handling %s %d +%d\n", index, req.path, req.offset, req.length)
 		stats.RecordConnectorReadLen(req.length)
 		prepared, err := connector.PrepareForRead(req.ctx, req.path, req.etag, req.writer, req.offset, req.length, req.status)
-		fmt.Printf("Worker %d completed handling %s %d +%d\n", index, req.path, req.offset, req.length)
+		Warn.Printf("Worker %d completed handling %s %d +%d\n", index, req.path, req.offset, req.length)
 		req.response <- &Resp{prepared: prepared, req: req, err: err}
 	}
 }
@@ -203,7 +206,7 @@ func getMissingRegions(cache Cache, path string, offset uint64, length uint64, f
 		if tryCount > 100 {
 			panic("something is wrong")
 		}
-		fmt.Printf("offset=%d, regionEnd=%d, fileLength=%d\n", offset, regionEnd, fileLength)
+		Warn.Printf("offset=%d, regionEnd=%d, fileLength=%d\n", offset, regionEnd, fileLength)
 		next := cache.GetFirstMissingRegion(path, offset, regionEnd-offset)
 		if next == nil {
 			break
@@ -216,7 +219,7 @@ func getMissingRegions(cache Cache, path string, offset uint64, length uint64, f
 				end = fileLength
 			}
 			r := &Region{start, end - start}
-			fmt.Printf("Adding region %d +%d\n", r.Offset, r.Length)
+			Warn.Printf("Adding region %d +%d\n", r.Offset, r.Length)
 			missing = append(missing, r)
 			offset = end
 		}
@@ -238,7 +241,7 @@ func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writ
 
 	responses := make(chan *Resp)
 	for _, region := range regions {
-		fmt.Printf("Fetching region %s to fulfill read of (offset: %d, len: %s) for %s\n", region, offset, length, path)
+		Warn.Printf("Fetching region %s to fulfill read of (offset: %d, len: %s) for %s\n", region, offset, length, path)
 		state := fs.tracker.AddOperation(fmt.Sprintf("PrepareForRead(%s, %d, %d)", path, region.Offset, region.Length))
 		fs.requestQueue <- &Req{ctx: ctx, path: path, etag: etag, writer: writer, offset: region.Offset, length: region.Length, status: state, response: responses}
 	}
@@ -248,11 +251,11 @@ func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writ
 	addedRegions := make([]*Region, 0, 100)
 	for i := 0; i < len(regions); i++ {
 		resp := <-responses
-		fmt.Printf("Received %d out of %d responses\n", i, len(regions))
+		Warn.Printf("Received %d out of %d responses\n", i, len(regions))
 
 		fs.tracker.OperationComplete(resp.req.status)
 		if resp.err != nil {
-			fmt.Printf("error = %s\n", resp.err.Error())
+			Warn.Printf("error = %s\n", resp.err.Error())
 			fs.stats.IncPrepareForReadFailedCount()
 			if finalErr == nil || resp.err != CanceledOperation {
 				finalErr = resp.err
@@ -304,7 +307,7 @@ type File struct {
 
 func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	a.Mode = os.ModeDir | 0777
-	fmt.Printf("Dir.Attr(%s) -> %o\n", d.path, a.Mode)
+	Warn.Printf("Dir.Attr(%s) -> %o\n", d.path, a.Mode)
 	return nil
 }
 
@@ -334,7 +337,7 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		entry := files.Get(name)
 		if entry == nil {
 			//if len(files.Files) == 0 {
-			fmt.Printf("Could not find entry for \"%s\" among %d entries for %s\n", name, len(files.Files), d.path)
+			Warn.Printf("Could not find entry for \"%s\" among %d entries for %s\n", name, len(files.Files), d.path)
 			//}
 			return nil, fuse.ENOENT
 		}
@@ -364,11 +367,11 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	}
 	files := filesv.Files
 
-	fmt.Printf("Dir \"%s\" had %d entries:", d.path, len(files))
+	Warn.Printf("Dir \"%s\" had %d entries:", d.path, len(files))
 	for _, f := range files {
-		fmt.Printf("\"%s\" ", f.Name)
+		Warn.Printf("\"%s\" ", f.Name)
 	}
-	fmt.Printf("\n")
+	Warn.Printf("\n")
 
 	dirDirs := make([]fuse.Dirent, len(files))
 	for i := 0; i < len(files); i++ {
@@ -380,7 +383,7 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 		}
 	}
 
-	fmt.Printf("returning Dirent with %d entries\n", len(dirDirs))
+	Warn.Printf("returning Dirent with %d entries\n", len(dirDirs))
 	return dirDirs, nil
 }
 
@@ -410,7 +413,7 @@ func (f *FileHandle) Forget() {
 
 func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 	//	a.Inode = 2
-	fmt.Printf("File.Attr(%s) -> size=%d\n", f.path, f.size)
+	Warn.Printf("File.Attr(%s) -> size=%d\n", f.path, f.size)
 	a.Mode = 0444
 	a.Size = f.size
 	return nil
@@ -418,7 +421,7 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 
 func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
 
-	fmt.Printf("open(%s)\n", f.path)
+	Warn.Printf("open(%s)\n", f.path)
 
 	localPath, err := f.fs.cache.GetLocalFile(f.path, f.size)
 	if err != nil {
@@ -460,25 +463,25 @@ func (w *LocalWriter) Write(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	//	fmt.Printf("write offset=%d, len(p)=%d, buffer=% x\n", w.offset, len(p), p)
+	//	Warn.Printf("write offset=%d, len(p)=%d, buffer=% x\n", w.offset, len(p), p)
 	n, err = fd.Write(p)
 	w.offset += int64(n)
 	return n, err
 }
 
 func (f *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	fmt.Printf("(Read) Writing to %s\n", f.file.Name())
+	Warn.Printf("(Read) Writing to %s\n", f.file.Name())
 	lw := NewLocalWriter(f.file.Name())
 	err := f.fs.PrepareForRead(ctx, f.path, f.etag, lw, uint64(req.Offset), uint64(req.Size), f.size, nil)
 	if err != nil {
-		fmt.Printf("PrepareForRead failed: %s\n", err.Error())
+		Warn.Printf("PrepareForRead failed: %s\n", err.Error())
 		return err
 	}
 
 	buffer := make([]byte, req.Size)
 	n, err := f.file.ReadAt(buffer, req.Offset)
 	if err != nil {
-		fmt.Printf("ReadAt returned error: %s\n", err.Error())
+		Warn.Printf("ReadAt returned error: %s\n", err.Error())
 		return err
 	}
 
@@ -500,7 +503,6 @@ func StartMount(mountpoint string, filesystem *FS) (*fuse.Conn, *fs.Server, chan
 	}
 
 	doneChan := make(chan struct{})
-	log.Println("Before server.Serve")
 	server := fs.New(c, nil)
 	go (func() {
 		err := server.Serve(filesystem)
@@ -509,7 +511,36 @@ func StartMount(mountpoint string, filesystem *FS) (*fuse.Conn, *fs.Server, chan
 		}
 		close(doneChan)
 	})()
-	log.Println("After server.Serve")
 
 	return c, server, doneChan
+}
+
+func InitLogging(level int, dest io.Writer) {
+	var debugHandle io.Writer = ioutil.Discard
+	var infoHandle io.Writer = ioutil.Discard
+	var warnHandle io.Writer = ioutil.Discard
+	var errorHandle io.Writer = dest
+
+	if level > 1 {
+		warnHandle = dest
+	}
+	if level > 2 {
+		infoHandle = dest
+	}
+	if level > 3 {
+		debugHandle = dest
+	}
+
+	Debug = log.New(debugHandle,
+		"DEBUG: ",
+		log.Ldate|log.Ltime|log.Lshortfile)
+	Info = log.New(infoHandle,
+		"INFO: ",
+		log.Ldate|log.Ltime|log.Lshortfile)
+	Warn = log.New(warnHandle,
+		"WARN: ",
+		log.Ldate|log.Ltime|log.Lshortfile)
+	Error = log.New(errorHandle,
+		"ERROR: ",
+		log.Ldate|log.Ltime|log.Lshortfile)
 }

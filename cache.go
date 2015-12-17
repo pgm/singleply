@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"sync"
@@ -131,7 +130,7 @@ func (c *LocalCache) GetLocalFile(path string, length uint64) (string, error) {
 			var err error
 			localFile, err := ioutil.TempFile(c.rootDir, "l")
 			localPath = localFile.Name()
-			fmt.Printf("Created local file: %s\n", localPath)
+			Info.Printf("Created local file: %s\n", localPath)
 			localFile.Close()
 			if err != nil {
 				return err
@@ -147,8 +146,6 @@ func (c *LocalCache) GetLocalFile(path string, length uint64) (string, error) {
 
 			bb := buffer.Bytes()
 			b.Put(key, bb)
-
-			//fmt.Printf("e=%s, writing %s -> len(): %d\n", e, key, len(bb))
 		} else {
 			var e FileCacheEntry
 
@@ -177,7 +174,6 @@ func (c *LocalCache) GetFirstMissingRegion(path string, offset uint64, length ui
 		b := tx.Bucket([]byte(FILE_MAP))
 		key := []byte(path)
 		entryBytes := b.Get(key)
-		//		fmt.Printf("in cache, fetched len %d for \"%s\"\n", len(entryBytes), path)
 		var e FileCacheEntry
 
 		buffer := bytes.NewBuffer(entryBytes)
