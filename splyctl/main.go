@@ -8,10 +8,10 @@ import (
 	"net/rpc"
 	"os"
 	// "time"
-	
-	"golang.org/x/net/context"
-	"bazil.org/fuse/fs"	
+
 	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
+	"golang.org/x/net/context"
 
 	_ "bazil.org/fuse/fs/fstestutil"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -159,14 +159,14 @@ type Config struct {
 }
 
 func loadConfig(c *cli.Context) *Config {
-	return _loadConfig( c.GlobalString("config") )
-	
+	return _loadConfig(c.GlobalString("config"))
+
 }
 
 func _loadConfig(configFile string) *Config {
 	cfg := Config{}
 	cfg.Settings.Workers = 5
-	cfg.Settings.FetchSize = 1024*1024
+	cfg.Settings.FetchSize = 1024 * 1024
 
 	fd, err := os.Open(configFile)
 	if err != nil {
@@ -185,13 +185,13 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "splymnt"
 	app.Usage = "splymnt fuse client"
-	
-	// TODO: use ~/.splyctl as config file by default and add command line arg to override 
+
+	// TODO: use ~/.splyctl as config file by default and add command line arg to override
 	// Streamline logging strategy
 	// support invalidate
-	
+
 	app.Flags = []cli.Flag{
-	 	&cli.StringFlag{Name: "config", Value: "~/.splyctl", Usage: "Path to config file"},
+		&cli.StringFlag{Name: "config", Value: "~/.splyctl", Usage: "Path to config file"},
 	}
 
 	// todo: add commands "mount", "status"

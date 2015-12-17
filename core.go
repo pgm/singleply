@@ -2,13 +2,13 @@ package singleply
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"io"
-	"sync"
 	"path"
 	"strings"
-	
+	"sync"
+
 	"errors"
 
 	"bazil.org/fuse"
@@ -31,24 +31,24 @@ type Connector interface {
 }
 
 type FS struct {
-	connector Connector
-	cache     Cache
-	tracker   *Tracker
-	stats     *Stats
+	connector    Connector
+	cache        Cache
+	tracker      *Tracker
+	stats        *Stats
 	requestQueue chan *Req
-	blockSize uint64
+	blockSize    uint64
 }
 
 func NewFileSystem(connector Connector, cache Cache, tracker *Tracker, stats *Stats, workers int, blockSize uint64) *FS {
 	queue := make(chan *Req)
-	for i := 0 ;i<workers;i++ {
+	for i := 0; i < workers; i++ {
 		go WorkerLoop(stats, i, connector, queue)
 	}
 	return &FS{connector: connector, cache: cache, tracker: tracker, stats: stats, requestQueue: queue, blockSize: blockSize}
 }
 
 func (f *FS) Root() (fs.Node, error) {
-	return &Dir{path: "", fs: f, childrenInUse: make(map[string] fs.Node)}, nil
+	return &Dir{path: "", fs: f, childrenInUse: make(map[string]fs.Node)}, nil
 }
 
 func (f *FS) Invalidate(ctx context.Context, server *fs.Server, path string) error {
@@ -61,13 +61,13 @@ func (f *FS) Invalidate(ctx context.Context, server *fs.Server, path string) err
 	if err != nil {
 		return err
 	}
-	
+
 	if path != "/" {
-	// drop leading slash
+		// drop leading slash
 		path = path[1:]
 		components := strings.Split(path, "/")
 		//fmt.Printf("components=%s, node=%s, err=%s\n", components, node, err)
-		for _, component := range(components) {
+		for _, component := range components {
 			dir, isDir := node.(*Dir)
 			if !isDir {
 				return InvalidPathError
@@ -79,7 +79,7 @@ func (f *FS) Invalidate(ctx context.Context, server *fs.Server, path string) err
 			node = nextNode
 		}
 	}
-	
+
 	err = server.InvalidateNodeData(node)
 	//fmt.Printf("node=%s\n", node, err)
 	return err
@@ -158,14 +158,14 @@ func (fs *FS) ListDir(ctx context.Context, path string) (*DirEntries, error) {
 
 type Resp struct {
 	prepared *Region
-	req *Req
-	err error
+	req      *Req
+	err      error
 }
 
 type Req struct {
-	ctx context.Context
-	path string
-	etag string
+	ctx    context.Context
+	path   string
+	etag   string
 	writer io.WriteSeeker
 	offset uint64
 	length uint64
@@ -179,12 +179,12 @@ func WorkerLoop(stats *Stats, index int, connector Connector, queue chan *Req) {
 	for {
 		fmt.Printf("Worker %d waiting\n", index)
 
-		req, ok := <- queue
-		if ! ok {
+		req, ok := <-queue
+		if !ok {
 			fmt.Printf("!ok, killing worker %d\n", index)
 			break
 		}
-		
+
 		fmt.Printf("Worker %d handling %s %d +%d\n", index, req.path, req.offset, req.length)
 		stats.RecordConnectorReadLen(req.length)
 		prepared, err := connector.PrepareForRead(req.ctx, req.path, req.etag, req.writer, req.offset, req.length, req.status)
@@ -193,13 +193,13 @@ func WorkerLoop(stats *Stats, index int, connector Connector, queue chan *Req) {
 	}
 }
 
-func getMissingRegions(cache Cache, path string, offset uint64, length uint64, fileLength uint64, blockSize uint64) [] *Region {
+func getMissingRegions(cache Cache, path string, offset uint64, length uint64, fileLength uint64, blockSize uint64) []*Region {
 	tryCount := 0
-	
-	regionEnd := offset+length
+
+	regionEnd := offset + length
 	missing := make([]*Region, 0, 100)
 	for {
-		tryCount ++
+		tryCount++
 		if tryCount > 100 {
 			panic("something is wrong")
 		}
@@ -210,12 +210,12 @@ func getMissingRegions(cache Cache, path string, offset uint64, length uint64, f
 		}
 
 		// divide missing into chunk sized pieces
-		for start := (next.Offset / blockSize) * blockSize ; start < next.Offset + next.Length ; start += blockSize {
+		for start := (next.Offset / blockSize) * blockSize; start < next.Offset+next.Length; start += blockSize {
 			end := start + blockSize
 			if end > fileLength {
 				end = fileLength
 			}
-			r := &Region{start, end-start}
+			r := &Region{start, end - start}
 			fmt.Printf("Adding region %d +%d\n", r.Offset, r.Length)
 			missing = append(missing, r)
 			offset = end
@@ -224,7 +224,7 @@ func getMissingRegions(cache Cache, path string, offset uint64, length uint64, f
 			break
 		}
 	}
-	
+
 	return missing
 }
 
@@ -242,14 +242,14 @@ func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writ
 		state := fs.tracker.AddOperation(fmt.Sprintf("PrepareForRead(%s, %d, %d)", path, region.Offset, region.Length))
 		fs.requestQueue <- &Req{ctx: ctx, path: path, etag: etag, writer: writer, offset: region.Offset, length: region.Length, status: state, response: responses}
 	}
-	
+
 	// block until all workers have responded
 	var finalErr error = nil
 	addedRegions := make([]*Region, 0, 100)
-	for i:=0;i<len(regions);i++ {
-		resp := <- responses
+	for i := 0; i < len(regions); i++ {
+		resp := <-responses
 		fmt.Printf("Received %d out of %d responses\n", i, len(regions))
-		
+
 		fs.tracker.OperationComplete(resp.req.status)
 		if resp.err != nil {
 			fmt.Printf("error = %s\n", resp.err.Error())
@@ -269,11 +269,11 @@ func (fs *FS) PrepareForRead(ctx context.Context, path string, etag string, writ
 			addedRegions = append(addedRegions, prepared)
 		}
 	}
-	
+
 	for _, prepared := range addedRegions {
 		fs.cache.AddedRegions(path, prepared.Offset, prepared.Length)
 	}
-	
+
 	return finalErr
 }
 
@@ -286,19 +286,19 @@ type FileHandle struct {
 }
 
 type Dir struct {
-	path string
-	fs   *FS
+	path   string
+	fs     *FS
 	parent *Dir
-	
-	lock sync.Mutex
-	childrenInUse map[string] fs.Node
+
+	lock          sync.Mutex
+	childrenInUse map[string]fs.Node
 }
 
 type File struct {
-	path string
-	fs   *FS
-	size uint64
-	etag string
+	path   string
+	fs     *FS
+	size   uint64
+	etag   string
 	parent *Dir
 }
 
@@ -330,7 +330,7 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-	
+
 		entry := files.Get(name)
 		if entry == nil {
 			//if len(files.Files) == 0 {
@@ -338,16 +338,16 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 			//}
 			return nil, fuse.ENOENT
 		}
-	
+
 		var childName string
 		if d.path == "" {
 			childName = name
 		} else {
 			childName = d.path + "/" + name
 		}
-		
+
 		if entry.IsDir {
-			node = &Dir{parent: d, path: childName, fs: d.fs, childrenInUse: make(map[string] fs.Node)}
+			node = &Dir{parent: d, path: childName, fs: d.fs, childrenInUse: make(map[string]fs.Node)}
 		} else {
 			node = &File{parent: d, path: childName, fs: d.fs, size: entry.Size, etag: entry.Etag}
 		}
@@ -433,7 +433,7 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 }
 
 type LocalWriter struct {
-	name string
+	name   string
 	offset int64
 }
 
@@ -455,12 +455,12 @@ func (w *LocalWriter) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 	defer fd.Close()
-	
+
 	_, err = fd.Seek(w.offset, 0)
 	if err != nil {
 		return 0, err
 	}
-//	fmt.Printf("write offset=%d, len(p)=%d, buffer=% x\n", w.offset, len(p), p)
+	//	fmt.Printf("write offset=%d, len(p)=%d, buffer=% x\n", w.offset, len(p), p)
 	n, err = fd.Write(p)
 	w.offset += int64(n)
 	return n, err
@@ -513,4 +513,3 @@ func StartMount(mountpoint string, filesystem *FS) (*fuse.Conn, *fs.Server, chan
 
 	return c, server, doneChan
 }
-

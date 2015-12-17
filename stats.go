@@ -2,8 +2,8 @@ package singleply
 
 import (
 	"fmt"
-	"sync/atomic"
 	"sync"
+	"sync/atomic"
 )
 
 type Stats struct {
@@ -17,8 +17,8 @@ type Stats struct {
 	GotStaleDirCount           int32
 	InvalidatedDirCount        int32
 
-	lock sync.Mutex
-	ReadRequestLengths []uint64
+	lock                 sync.Mutex
+	ReadRequestLengths   []uint64
 	ConnectorReadLengths []uint64
 }
 

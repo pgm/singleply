@@ -18,7 +18,6 @@ type FileCacheEntry struct {
 	Valid     *RegionSet
 }
 
-
 type DirEntries struct {
 	Valid bool
 	Files []*FileStat

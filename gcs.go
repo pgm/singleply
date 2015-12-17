@@ -2,12 +2,12 @@ package singleply
 
 import (
 	"fmt"
-	"log"
-	"io"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/googleapi"
 	storage "google.golang.org/api/storage/v1"
+	"io"
+	"log"
 )
 
 type GCSConnection struct {
@@ -27,12 +27,12 @@ func listAllObjects(service *storage.ObjectsService, bucketName string, prefix s
 		if err != nil {
 			return err
 		}
-		
+
 		err = callback(res)
 		if err != nil {
 			return err
 		}
-		
+
 		if pageToken = res.NextPageToken; pageToken == "" {
 			break
 		}
@@ -92,7 +92,7 @@ func (c *GCSConnection) ListDir(context context.Context, path string, status Sta
 		return nil
 
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -159,5 +159,3 @@ func (c *GCSConnection) PrepareForRead(context context.Context, path string, eta
 
 	return &Region{offset, uint64(res.ContentLength)}, err
 }
-
-

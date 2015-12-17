@@ -2,8 +2,8 @@ package singleply
 
 import (
 	"fmt"
-	"os"
 	"io/ioutil"
+	"os"
 
 	"bytes"
 	"log"
@@ -68,7 +68,7 @@ func (s *GCSSuite) TestGCSSuite(c *C) {
 	localPathWriter, err := os.OpenFile(localPath, os.O_RDWR, 0)
 	c.Assert(err, IsNil)
 	defer localPathWriter.Close()
-	
+
 	region, err := connection.PrepareForRead(ctx, "sample", found.Etag, localPathWriter, 0, 10, status)
 	c.Assert(err, IsNil)
 	c.Assert(region.Offset, Equals, uint64(0))

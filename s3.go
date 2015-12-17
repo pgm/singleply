@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -103,10 +102,10 @@ func (c *S3Connection) PrepareForRead(context context.Context, path string, etag
 
 func isCanceled(context context.Context) bool {
 	select {
-		case <- context.Done():
-			return true
-		default:
-			return false
+	case <-context.Done():
+		return true
+	default:
+		return false
 	}
 }
 
@@ -129,7 +128,7 @@ func (c *S3Connection) ListDir(context context.Context, path string, status Stat
 		if cancelled {
 			return false
 		}
-		
+
 		//fmt.Printf("ListObjectPages returned %s\n", p)
 
 		for _, p := range p.CommonPrefixes {
